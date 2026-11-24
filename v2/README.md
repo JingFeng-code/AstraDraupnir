@@ -46,18 +46,18 @@ The delivery runs on `127.0.0.1` with a local PostgreSQL and a local administrat
 | Transport | plain HTTP on loopback | TLS everywhere; set `options.Cookie.SecurePolicy = Always` (the code keeps `SameAsRequest` so localhost works) |
 | Session lifetime | 8 hours absolute (`ExpireTimeSpan`, `SlidingExpiration = false`) | same, or shorter; align with the organisation's policy |
 | Session revocation | `User.SecurityStamp` is a cookie claim, rotated on every user change (password, role, active flag); `Access.Current` and `/api/auth/me` reject a stale or missing stamp | same; add a "sign out everywhere" action if needed |
-| Login throttling | 5 failed attempts per e-mail inside 10 minutes -> `429` (counted from the audit log; successful logins are unaffected) | keep, and add an IP-based limiter at the edge |
+| Login throttling | 5 failed attempts per e-mail inside 10 minutes -> `429` (counted from audit log; correct credentials are also temporarily throttled after the threshold) | keep, and add an IP-based limiter at the edge |
 | Secrets | administrator password only via `DRAUPNIR_ADMIN_EMAIL` / `DRAUPNIR_ADMIN_PASSWORD`; nothing is committed; E2E needs `E2E_ADMIN_PASSWORD` | use a secret manager, rotate the bootstrap password, and remove the seed path once the first admin exists |
 | API schema | `/openapi/v1.json` is anonymous (handy locally) | disable it or put it behind authorization |
 | Roles | `Admin` / `Member` only; no MFA, no SSO/OIDC (ADR-006) | add SSO/MFA through an external identity provider |
 
-The local databases (`draupnir`, `draupnir_design`, `draupnir_v21`) are disposable development data; the administrator passwords for them were rotated at delivery time and are not published in this repository.
+The local preview databases (`draupnir`, `draupnir_design`, `draupnir_v21`) are **not disposable E2E targets**; preserve their existing data; the administrator passwords for them were rotated at delivery time and are not published in this repository.
 
 ### Spool results
 
 `POST /api/projects/{id}/spool-results` accepts a `spool-result/v1` JSON body (`schema`, `command`, `status`, `exitCode`, `findings`, `counts`, optional `affectedTraces`). It stores a `Trace` evidence row named after the command, with the original JSON in `data`; `status=pass` maps to `Pass`, `status=fail` to `Fail`. A SHA-256 of the payload makes re-import idempotent. `GET /api/projects/{id}/spool-results` and the Evidence page show the command, status, counts and affected traces. Invalid schema/status/arrays are `400`.
 
-POST /api/import/supervisor accepts either Supervisor queue.json or delivery state/tasks.json as a JSON body. Pass ?projectId=... to associate the payload with an existing project, and pass ?sourceInstance=... to name the Supervisor source. The source-instance is the import namespace used together with `Source`, `ExternalTaskId` and `Attempt` for lookups and the unique index. Without the query parameter, the API uses the payload-level `sourceInstance`, then the first task's `repo` (or `worktree`, then `state`), and finally `supervisor`; it never uses the Draupnir project id. The same task id in two source instances is two independent runs; re-importing the same source and attempt updates the existing run (idempotent). Otherwise import matches the task repository to a project or creates a project for it. A reviewer assignment by itself does not produce a verdict. Existing rows were backfilled with their project key (or `legacy` for orphan runs) by the `AddAgentRunSourceInstance` migration.
+POST /api/import/supervisor is Admin-only and accepts Supervisor queue.json or delivery state/tasks.json. Prefer explicit ?projectId= and ?sourceInstance= for trusted imports. Identity is Source + SourceInstance + ExternalTaskId + Attempt. Source precedence: explicit query, payload-level sourceInstance, then the selected project's frozen SourceInstance (first import sets it; migration backfills project Key). Without both a selected project and explicit source, the API can reuse a unique existing task/attempt; multiple matches return 409. When no run exists it matches or creates a project using repository information, then uses the project's namespace. Re-import of the same identity updates its run. Cross-project association conflicts are refused. Default and custom Gate refs are namespaced; legacy Pending gates may be adopted, decided legacy gates remain and a new Pending gate is created. A crafted custom ref may still adopt another source's Pending gate (L-01 in ../docs/v21/BACKLOG.md); do not import untrusted snapshots. A reviewer assignment alone does not produce a verdict.
 
 GET /api/projects/{id}/work-items accepts status, type, sprintId, q, page, and pageSize. It returns items, total, page, and pageSize. DELETE /api/projects/{id} archives the project. The dashboard activeSprintCompletionRate is a percentage from 0 to 100.
 
@@ -65,7 +65,7 @@ POST /api/projects/{id}/reports creates a Markdown report and Stylus DocumentSpe
 
 ### Human Gate evidence rules
 
-The API is the enforcement point; the Web rules are a readable mirror. A gate linked to a work item evaluates only the **latest attempt of each source** (`Source` + `SourceInstance`) and only **fresh** evidence: an evidence row recorded before the work item's `UpdatedAt` is stale and cannot be the sole basis for approval. `Pass` is required; `Fail` and `ChangesRequested` block direct approval; `Blocked` and `NotTested` are not passes. Older attempts, stale rows and their IDs remain visible in the trace and are listed in the gate snapshot, but do not block a later successful retry. A decision stores `EvidenceSnapshot` (counts, used/latest/stale IDs, latest attempts and whether an exception was used) so it remains auditable after evidence changes.
+The API is the enforcement point; the Web rules are a readable mirror. A gate linked to a work item evaluates only the **latest attempt of each source task** (`Source` + `SourceInstance` + `ExternalTaskId`) and only **fresh** evidence: an evidence row recorded before the work item's `UpdatedAt` is stale and cannot be the sole basis for approval. `Pass` is required; `Fail` and `ChangesRequested` block direct approval; `Blocked` and `NotTested` are not passes. Older attempts, stale rows and their IDs remain visible in the trace and are listed in the gate snapshot, but do not block a later successful retry. A SERIALIZABLE decision transaction stores `EvidenceSnapshot` (counts, used/latest/stale IDs, latest attempts, evaluated evidence metadata/hash, review verdict and exception/manual reason) so it remains auditable after evidence changes. The hash describes stored evidence data or metadata; it does not independently verify the bytes of an external file.
 
 A linked gate with missing/failed evidence can only be approved with the fixed manual-exception prefix plus a reason of at least 20 characters; it remains Admin-only. A gate with **no work item** is a human judgement, but approval now requires a written reason of at least 20 characters and the reason is written to the `gate.decision` audit row.
 
@@ -77,7 +77,7 @@ dotnet build --no-restore
 dotnet test --no-build --no-restore
 ~~~
 
-Integration tests use WebApplicationFactory and PostgreSQL. The test connection defaults to the local postgres maintenance database at port 55432. DRAUPNIR_TEST_POSTGRES overrides it. The integration test fixture creates, migrates, and removes its own draupnir_test_<guid> database. Current tests: API 36/36, Web 48/48, Playwright 26/26 (desktop 1280 and 390px; delivery flow, V2.1 acceptance and keyboard/a11y); the E2E includes Bug severity, a two-user access check, gate evidence rules and the audit log. Spool evidence is covered by API/Web tests. The V2.1 workspace (Direction D) and the requirement matrix are described in `../docs/v21/ACCEPTANCE.md`. To include actual DOCX rendering in the report test, set DRAUPNIR_TEST_STYLUS_EXECUTABLE to a local Stylus executable.
+Integration tests use WebApplicationFactory and PostgreSQL. The test connection defaults to the local postgres maintenance database at port 55432. DRAUPNIR_TEST_POSTGRES overrides it. The integration test fixture creates, migrates, and removes its own draupnir_test_<guid> database. Final local Agent regression report for cdf0ee1: API 49/49, Web 52/52, Playwright 26/26 (desktop 1280 and mobile 360px; delivery flow, V2.1 acceptance and keyboard/a11y); the E2E includes Bug severity, a two-user access check, gate evidence rules and the audit log. Spool evidence is covered by API/Web tests. The V2.1 workspace (Direction D) and the requirement matrix are described in `../docs/v21/ACCEPTANCE.md`. To include actual DOCX rendering in the report test, set DRAUPNIR_TEST_STYLUS_EXECUTABLE to a local Stylus executable.
 
 ## Web（Nuxt 4）
 
@@ -114,23 +114,31 @@ npm run build        # production build (.output)
 `npm run test:e2e` builds the web app, starts the Nuxt server with `NUXT_API_BASE`, and runs Playwright on desktop (1280) and mobile (360). It expects:
 
 - PostgreSQL running on `127.0.0.1:55432` (see “Start PostgreSQL and migrate”).
-- The API running at `http://127.0.0.1:5080` with an administrator configured and a migrated database; use a dedicated disposable database such as `draupnir_e2e` or `draupnir_v21_fix2` (the guard refuses the preview). The E2E run creates projects, a Bug with severity, a second Member, and imports Supervisor data.
-- The Playwright global setup is fail-closed: it calls anonymous `GET /api/health`, refuses unless the API reports `status=ok` and `disposable=true`, refuses the shared `draupnir` / `draupnir_v21` / `draupnir_design` databases, refuses a non-loopback API, and refuses without the explicit write opt-in. Run `npx vitest run tests/unit/e2eGuard.test.ts` for the guard proof.
+- The separate test API running at `http://127.0.0.1:5088` with an administrator configured and a migrated database; use a dedicated disposable database such as `draupnir_e2e` or `draupnir_v21_fix2` (the guard refuses the preview). The E2E run creates projects, a Bug with severity, a second Member, and imports Supervisor data.
+- The Playwright global setup is fail-closed: it calls anonymous `GET /api/health`, refuses unless the API reports `status=ok` and `disposable=true`, refuses the shared `draupnir` / `draupnir_v21` / `draupnir_design` databases, refuses a non-loopback API, and refuses without the explicit write opt-in, writable E2E_STATE_DIR, and a matching nonempty E2E_EXPECTED_INSTANCE / E2E_INSTANCE_TOKEN. Playwright never reuses an existing server. Run `npx vitest run tests/unit/e2eGuard.test.ts` for the guard proof.
 
 ~~~powershell
-# Example API process for E2E (separate database)
+# Example API process for E2E (separate database, migrate first)
+# Choose a unique non-secret marker and use exactly the same value in the Web terminal.
+$env:E2E_INSTANCE_TOKEN = '<unique-test-instance-marker>'
 $env:ConnectionStrings__Draupnir = 'Host=127.0.0.1;Port=55432;Database=draupnir_e2e;Username=postgres'
 $env:DRAUPNIR_ADMIN_EMAIL = 'admin@draupnir.local'
 $env:DRAUPNIR_ADMIN_PASSWORD = '<choose a password for this local instance>'
-dotnet run --project src/Draupnir.Api --no-build --no-restore -- --urls http://127.0.0.1:5080
+dotnet ef database update --project src/Draupnir.Api --no-build
+dotnet run --project src/Draupnir.Api --no-build --no-restore -- --urls http://127.0.0.1:5088
 
-cd ../web
+# In a separate terminal, from v2/web:
 $env:E2E_ALLOW_WRITE = '1'
-$env:E2E_STATE_DIR = 'E:\Astra\.cache\tmp\t75-e2e-state'
+$env:E2E_STATE_DIR = Join-Path $env:TEMP ('draupnir-e2e-' + [guid]::NewGuid().ToString('N'))
+$env:E2E_EXPECTED_INSTANCE = '<same-unique-test-instance-marker>'
 $env:E2E_ADMIN_PASSWORD = '<the API administrator password>'
 $env:NUXT_API_BASE = 'http://127.0.0.1:5088'
 $env:E2E_PORT = '4950'
 npm run test:e2e
 ~~~
 
-The flow covers login → create project → create requirement and two work items → add a dependency → attempt to move the dependent item to Done (blocked with a Chinese message) → import `tests/Draupnir.Api.Tests/Fixtures/queue.json` → approve a Human Gate through the confirmation dialog → generate and view a delivery report. It also runs axe (WCAG 2.1 A/AA) on the main pages and checks 360px pages for horizontal scrolling. Screenshots are written to `E:\Astra\.astra-runs\AUTONOMOUS-DELIVERY\acceptance\screens\draupnir` (override with `E2E_SCREENSHOT_DIR`).
+The flow covers login → create project → create requirement and two work items → add a dependency → attempt to move the dependent item to Done (blocked with a Chinese message) → import `tests/Draupnir.Api.Tests/Fixtures/queue.json` → approve a Human Gate through the confirmation dialog → generate and view a delivery report. It also runs axe (WCAG 2.1 A/AA) on the main pages and checks 360px pages for horizontal scrolling. Configure `E2E_SCREENSHOT_DIR` to a dedicated local artifact directory. Preserve preview data and only clean up disposable test resources after confirming their identity.
+
+## V2.1 frozen delivery
+
+See [release readiness](../docs/v21/RELEASE-READINESS.md), [acceptance](../docs/v21/ACCEPTANCE.md), and [test summary](../docs/v21/TEST-SUMMARY.md). Local product direction accepted, feature-frozen, full owner UAT not recorded. Draft PR #5 is not merged, released or deployed.
