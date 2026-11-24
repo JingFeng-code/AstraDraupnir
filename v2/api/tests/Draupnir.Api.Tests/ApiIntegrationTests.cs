@@ -204,11 +204,17 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "gate.decision");
 
         Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/users/{memberId}", new { role = "Admin" })).StatusCode);
-        Assert.Equal("Admin", (await Json(await member.GetAsync("/api/auth/me"))).GetProperty("role").GetString());
+        // 角色變更會輪替 security stamp：舊 session 立即失效，必須重新登入才看得到新角色。
+        Assert.Equal(HttpStatusCode.Unauthorized, (await member.GetAsync("/api/auth/me")).StatusCode);
+        using var memberAsAdmin = NewClient();
+        await LoginAs(memberAsAdmin, email, initialPassword);
+        Assert.Equal("Admin", (await Json(await memberAsAdmin.GetAsync("/api/auth/me"))).GetProperty("role").GetString());
         Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/users/{memberId}", new { role = "Member" })).StatusCode);
+        using var memberAgain = NewClient();
+        await LoginAs(memberAgain, email, initialPassword);
         Assert.Equal(HttpStatusCode.NoContent, (await admin.DeleteAsync($"/api/projects/{allowed}/members/{memberId}")).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await member.GetAsync($"/api/projects/{allowed}")).StatusCode);
-        var afterRemove = await Json(await member.GetAsync("/api/projects"));
+        Assert.Equal(HttpStatusCode.Forbidden, (await memberAgain.GetAsync($"/api/projects/{allowed}")).StatusCode);
+        var afterRemove = await Json(await memberAgain.GetAsync("/api/projects"));
         Assert.DoesNotContain(afterRemove.EnumerateArray(), item => item.GetProperty("id").GetGuid() == allowed);
 
         Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/users/{memberId}", new { password = newPassword })).StatusCode);
@@ -403,6 +409,44 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         // 還原種子管理員，避免影響同一測試資料庫中其他測試的登入。
         Assert.Equal(HttpStatusCode.OK, (await verifier.PatchAsJsonAsync($"/api/users/{idA}", new { isActive = true })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await verifier.PatchAsJsonAsync($"/api/users/{idB}", new { isActive = true })).StatusCode);
+    }
+
+    [Fact]
+    public async Task PasswordResetAndRoleChangeInvalidateExistingSessions()
+    {
+        using var admin = await AuthorizedClient();
+        var email = "session-user@example.test";
+        var password = "Session-pass-1";
+        var userId = (await Json(await admin.PostAsJsonAsync("/api/users",
+            new { email, displayName = "Session user", password, role = "Member" }))).GetProperty("id").GetGuid();
+        using var member = NewClient();
+        await LoginAs(member, email, password);
+        Assert.Equal(HttpStatusCode.OK, (await member.GetAsync("/api/auth/me")).StatusCode);
+
+        // 改密碼後，舊 cookie 必須失效（security stamp 輪替）
+        Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/users/{userId}", new { password = "Session-pass-2" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await member.GetAsync("/api/auth/me")).StatusCode);
+
+        using var relogin = NewClient();
+        await LoginAs(relogin, email, "Session-pass-2");
+        Assert.Equal(HttpStatusCode.OK, (await relogin.GetAsync("/api/auth/me")).StatusCode);
+
+        // 改角色也讓舊 session 失效
+        Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/users/{userId}", new { role = "Admin" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await relogin.GetAsync("/api/auth/me")).StatusCode);
+    }
+
+    [Fact]
+    public async Task RepeatedFailedLoginsAreThrottled()
+    {
+        using var client = NewClient();
+        var email = "throttle@example.test";
+        for (var attempt = 1; attempt <= 5; attempt++)
+            Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/auth/login",
+                new { email, password = "wrong-password" })).StatusCode);
+        // 第六次（即使密碼正確）在 10 分鐘視窗內一律 429
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await client.PostAsJsonAsync("/api/auth/login",
+            new { email, password = "wrong-password" })).StatusCode);
     }
 
     [Fact]

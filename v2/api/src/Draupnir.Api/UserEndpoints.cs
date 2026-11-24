@@ -63,6 +63,8 @@ public static class UserEndpoints
             }
             user.Role = nextRole;
             user.IsActive = nextActive;
+            // 任何變更都讓既有 session 失效（改密碼後舊 cookie 不能再使用）。
+            user.SecurityStamp = Guid.NewGuid();
             if (input.Password is not null)
             {
                 if (input.Password.Length < 8) return Invalid("password", "Password must be at least 8 characters.");

@@ -25,6 +25,9 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     options.Cookie.HttpOnly = true;
     options.Cookie.SameSite = SameSiteMode.Strict;
     options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    // 本機開發走 HTTP；正式部署請用 TLS 並把 SecurePolicy 改成 Always（見 v2/README 的安全政策）。
+    options.ExpireTimeSpan = TimeSpan.FromHours(8);
+    options.SlidingExpiration = false;
     options.Events.OnRedirectToLogin = context => { context.Response.StatusCode = 401; return Task.CompletedTask; };
     options.Events.OnRedirectToAccessDenied = context => { context.Response.StatusCode = 403; return Task.CompletedTask; };
 });
@@ -59,6 +62,12 @@ api.MapPost("/auth/login", async (Login input, DraupnirDb db, IPasswordHasher<Us
     var email = input.Email?.Trim().ToLowerInvariant();
     if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(input.Password))
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["credentials"] = ["Email and password are required."] });
+    // 失敗節流（以 audit 記錄為準，不影響成功登入）：同一 email 10 分鐘內失敗 5 次就 429。
+    var windowStart = DateTimeOffset.UtcNow.AddMinutes(-10);
+    var recentFailures = await db.AuditLogs.CountAsync(row =>
+        row.Action == "auth.login.failed" && row.Detail == $"email={email}" && row.CreatedAt >= windowStart);
+    if (recentFailures >= 5)
+        return Results.Problem("Too many failed sign-in attempts. Try again later.", statusCode: 429);
     var user = await db.Users.SingleOrDefaultAsync(x => x.Email == email);
     if (user is null)
     {
@@ -75,7 +84,8 @@ api.MapPost("/auth/login", async (Login input, DraupnirDb db, IPasswordHasher<Us
     await context.SignInAsync(new ClaimsPrincipal(new ClaimsIdentity([
         new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
         new Claim(ClaimTypes.Name, user.DisplayName),
-        new Claim(ClaimTypes.Role, user.Role.ToString())
+        new Claim(ClaimTypes.Role, user.Role.ToString()),
+        new Claim("draupnir:stamp", user.SecurityStamp.ToString())
     ], CookieAuthenticationDefaults.AuthenticationScheme)));
     db.AuditLogs.Add(new AuditLog { ActorUserId = user.Id, Action = "auth.login", TargetType = "user", TargetId = user.Id, Detail = "local password login" });
     await db.SaveChangesAsync();
@@ -94,8 +104,9 @@ api.MapPost("/auth/logout", async (HttpContext context, ClaimsPrincipal principa
 });
 api.MapGet("/auth/me", async (ClaimsPrincipal principal, DraupnirDb db) =>
 {
-    var user = await db.Users.FindAsync(Guid.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!));
-    return user is null || !user.IsActive ? Results.Problem(statusCode: 401) : Results.Ok(new { user.Id, user.Email, user.DisplayName, user.Role, user.IsActive });
+    // 與其他端點用同一套檢查：未啟用或 security stamp 已被輪替（改密碼／角色）都視為未登入。
+    if (await Access.Current(db, principal) is not { } user) return Results.Problem(statusCode: 401);
+    return Results.Ok(new { user.Id, user.Email, user.DisplayName, user.Role, user.IsActive });
 });
 
 api.MapProjectEndpoints();

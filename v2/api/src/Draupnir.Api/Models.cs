@@ -24,6 +24,8 @@ public sealed class User
     public string Email { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public string PasswordHash { get; set; } = "";
+    /// <summary>每次改密碼／角色／啟用狀態就換一個；舊 cookie 的 claim 不符就失效。</summary>
+    public Guid SecurityStamp { get; set; } = Guid.NewGuid();
     public UserRole Role { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

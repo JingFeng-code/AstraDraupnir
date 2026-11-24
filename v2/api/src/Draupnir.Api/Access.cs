@@ -10,7 +10,10 @@ public static class Access
     {
         if (!Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var id)) return null;
         var user = await db.Users.FindAsync(id);
-        return user is { IsActive: true } ? user : null;
+        if (user is not { IsActive: true }) return null;
+        // 舊 cookie 沒有 stamp，或 stamp 已被輪替（改密碼／角色／啟用狀態）就視為未登入。
+        var stamp = principal.FindFirstValue("draupnir:stamp");
+        return stamp is not null && Guid.TryParse(stamp, out var value) && value == user.SecurityStamp ? user : null;
     }
 
     public static bool IsAdmin(User user) => user.Role == UserRole.Admin;
