@@ -60,13 +60,14 @@ api.MapPost("/auth/login", async (Login input, DraupnirDb db, IPasswordHasher<Us
     if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(input.Password))
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["credentials"] = ["Email and password are required."] });
     var user = await db.Users.SingleOrDefaultAsync(x => x.Email == email);
-    if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, input.Password) == PasswordVerificationResult.Failed)
+    if (user is null || !user.IsActive || hasher.VerifyHashedPassword(user, user.PasswordHash, input.Password) == PasswordVerificationResult.Failed)
         return Results.Problem("Invalid credentials.", statusCode: 401);
     await context.SignInAsync(new ClaimsPrincipal(new ClaimsIdentity([
         new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-        new Claim(ClaimTypes.Name, user.DisplayName)
+        new Claim(ClaimTypes.Name, user.DisplayName),
+        new Claim(ClaimTypes.Role, user.Role.ToString())
     ], CookieAuthenticationDefaults.AuthenticationScheme)));
-    return Results.Ok(new { user.Id, user.Email, user.DisplayName });
+    return Results.Ok(new { user.Id, user.Email, user.DisplayName, user.Role, user.IsActive });
 }).AllowAnonymous();
 api.MapPost("/auth/logout", async (HttpContext context) =>
 {
@@ -76,12 +77,13 @@ api.MapPost("/auth/logout", async (HttpContext context) =>
 api.MapGet("/auth/me", async (ClaimsPrincipal principal, DraupnirDb db) =>
 {
     var user = await db.Users.FindAsync(Guid.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!));
-    return user is null ? Results.Problem(statusCode: 401) : Results.Ok(new { user.Id, user.Email, user.DisplayName });
+    return user is null || !user.IsActive ? Results.Problem(statusCode: 401) : Results.Ok(new { user.Id, user.Email, user.DisplayName, user.Role, user.IsActive });
 });
 
 api.MapProjectEndpoints();
 api.MapDeliveryEndpoints();
 api.MapSpoolEndpoints();
+api.MapUserEndpoints();
 
 if (args.Contains("--seed-demo") || !EF.IsDesignTime)
 {

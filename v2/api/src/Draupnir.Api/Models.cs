@@ -16,6 +16,7 @@ public enum EvidenceKind { Test, Build, Trace, Document, Log }
 public enum EvidenceResult { Pass, Fail, NotTested, Blocked }
 public enum Verdict { Pass, ChangesRequested }
 public enum GateStatus { Pending, Approved, Rejected }
+public enum UserRole { Admin, Member }
 
 public sealed class User
 {
@@ -23,6 +24,25 @@ public sealed class User
     public string Email { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public string PasswordHash { get; set; } = "";
+    public UserRole Role { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class ProjectMember
+{
+    public Guid ProjectId { get; set; }
+    public Guid UserId { get; set; }
+}
+
+public sealed class AuditLog
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ActorUserId { get; set; }
+    public string Action { get; set; } = "";
+    public string TargetType { get; set; } = "";
+    public Guid? TargetId { get; set; }
+    public string Detail { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -177,6 +197,8 @@ public sealed class DeliveryReport : IProjectChild
 public sealed class DraupnirDb(DbContextOptions<DraupnirDb> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<Requirement> Requirements => Set<Requirement>();
     public DbSet<WorkItem> WorkItems => Set<WorkItem>();
@@ -192,6 +214,9 @@ public sealed class DraupnirDb(DbContextOptions<DraupnirDb> options) : DbContext
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<User>().HasIndex(x => x.Email).IsUnique();
+        model.Entity<ProjectMember>().HasKey(x => new { x.ProjectId, x.UserId });
+        model.Entity<ProjectMember>().HasIndex(x => x.UserId);
+        model.Entity<AuditLog>().HasIndex(x => x.CreatedAt);
         model.Entity<Project>().HasIndex(x => x.Key).IsUnique();
         model.Entity<Requirement>().HasIndex(x => new { x.ProjectId, x.Code }).IsUnique();
         model.Entity<WorkItem>().HasIndex(x => new { x.ProjectId, x.Code }).IsUnique();
@@ -217,6 +242,9 @@ public sealed class DraupnirDb(DbContextOptions<DraupnirDb> options) : DbContext
         model.Entity<WorkItemDependency>().HasOne<WorkItem>().WithMany().HasForeignKey(x => x.WorkItemId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<WorkItemDependency>().HasOne<WorkItem>().WithMany().HasForeignKey(x => x.DependsOnId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<Evidence>().HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<ProjectMember>().HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<ProjectMember>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<AuditLog>().HasOne<User>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.Restrict);
         foreach (var type in new[] { typeof(AgentRun), typeof(Evidence), typeof(Review), typeof(HumanGate) })
             model.Entity(type).HasOne(typeof(WorkItem)).WithMany().HasForeignKey("WorkItemId").OnDelete(DeleteBehavior.Restrict);
         model.Entity<Evidence>().HasOne<AgentRun>().WithMany().HasForeignKey(x => x.AgentRunId).OnDelete(DeleteBehavior.Restrict);

@@ -1,4 +1,5 @@
 using System.Data;
+using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using static Draupnir.Api.ApiRules;
@@ -9,11 +10,27 @@ public static class ProjectEndpoints
 {
     public static void MapProjectEndpoints(this RouteGroupBuilder api)
     {
-        api.MapGet("/projects", async (DraupnirDb db) => await db.Projects.OrderBy(x => x.Key).ToListAsync());
-        api.MapGet("/projects/{id:guid}", async (Guid id, DraupnirDb db) =>
-            await db.Projects.FindAsync(id) is { } project ? Results.Ok(project) : Missing());
-        api.MapPost("/projects", async (Project input, DraupnirDb db) =>
+        api.MapGet("/projects", async (ClaimsPrincipal principal, DraupnirDb db) =>
         {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            var query = db.Projects.AsQueryable();
+            if (!Access.IsAdmin(user))
+                query = query.Where(p => db.ProjectMembers.Any(m => m.ProjectId == p.Id && m.UserId == user.Id));
+            return Results.Ok(await query.OrderBy(x => x.Key).ToListAsync());
+        });
+
+        api.MapGet("/projects/{id:guid}", async (Guid id, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (await db.Projects.FindAsync(id) is not { } project) return Missing();
+            if (!await Access.CanProject(db, user, id)) return Access.Forbidden();
+            return Results.Ok(project);
+        });
+
+        api.MapPost("/projects", async (Project input, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (!Access.IsAdmin(user)) return Access.Forbidden();
             if (Validate(input) is { } invalid) return invalid;
             input.Id = Guid.NewGuid();
             input.CreatedAt = input.UpdatedAt = DateTimeOffset.UtcNow;
@@ -21,8 +38,12 @@ public static class ProjectEndpoints
             await db.SaveChangesAsync();
             return Results.Created($"/api/projects/{input.Id}", input);
         });
-        api.MapPut("/projects/{id:guid}", async (Guid id, Project input, DraupnirDb db) =>
+
+        api.MapPut("/projects/{id:guid}", async (Guid id, Project input, ClaimsPrincipal principal, DraupnirDb db) =>
         {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (!await db.Projects.AnyAsync(p => p.Id == id)) return Missing();
+            if (!await Access.CanProject(db, user, id)) return Access.Forbidden();
             if (Validate(input) is { } invalid) return invalid;
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
             if (await db.Projects.FindAsync(id) is not { } project) return Missing();
@@ -36,8 +57,11 @@ public static class ProjectEndpoints
             await tx.CommitAsync();
             return Results.Ok(project);
         });
-        api.MapDelete("/projects/{id:guid}", async (Guid id, DraupnirDb db) =>
+
+        api.MapDelete("/projects/{id:guid}", async (Guid id, ClaimsPrincipal principal, DraupnirDb db) =>
         {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (!Access.IsAdmin(user)) return Access.Forbidden();
             if (await db.Projects.FindAsync(id) is not { } project) return Missing();
             if (project.Status != ProjectStatus.Archived)
             {
@@ -53,22 +77,31 @@ public static class ProjectEndpoints
         MapChildren<Sprint>(api, "sprints");
         MapChildren<Milestone>(api, "milestones");
         api.MapGet("/projects/{projectId:guid}/work-items", ListWorkItems);
-        api.MapGet("/work-items/{id:guid}/dependencies", async (Guid id, DraupnirDb db) =>
-            await db.WorkItems.AnyAsync(x => x.Id == id)
-                ? Results.Ok(await db.Dependencies.Where(x => x.WorkItemId == id).ToListAsync()) : Missing());
-        api.MapPost("/work-items/{id:guid}/dependencies", AddDependency);
-        api.MapDelete("/work-items/{id:guid}/dependencies/{depId:guid}", async (Guid id, Guid depId, DraupnirDb db) =>
+        api.MapGet("/work-items/{id:guid}/dependencies", async (Guid id, ClaimsPrincipal principal, DraupnirDb db) =>
         {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (await db.WorkItems.FindAsync(id) is not { } item) return Missing();
+            if (!await Access.CanProject(db, user, item.ProjectId)) return Access.Forbidden();
+            return Results.Ok(await db.Dependencies.Where(x => x.WorkItemId == id).ToListAsync());
+        });
+        api.MapPost("/work-items/{id:guid}/dependencies", AddDependency);
+        api.MapDelete("/work-items/{id:guid}/dependencies/{depId:guid}", async (Guid id, Guid depId, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (await db.WorkItems.FindAsync(id) is not { } item) return Missing();
+            if (!await Access.CanProject(db, user, item.ProjectId)) return Access.Forbidden();
             if (await db.Dependencies.FindAsync(id, depId) is not { } dependency) return Missing();
             db.Dependencies.Remove(dependency);
             await db.SaveChangesAsync();
             return Results.NoContent();
         });
-        api.MapPatch("/work-items/{id:guid}/status", async (Guid id, StatusChange input, DraupnirDb db) =>
+        api.MapPatch("/work-items/{id:guid}/status", async (Guid id, StatusChange input, ClaimsPrincipal principal, DraupnirDb db) =>
         {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
             if (input.Status is not { } status) return Invalid("status", "A status is required.");
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
             if (await db.WorkItems.FindAsync(id) is not { } item) return Missing();
+            if (!await Access.CanProject(db, user, item.ProjectId)) return Access.Forbidden();
             if (await CheckStatus(db, id, status, input.Reason) is { } issue) return issue;
             item.Status = status;
             item.BlockedReason = status == WorkStatus.Blocked ? input.Reason : null;
@@ -83,19 +116,33 @@ public static class ProjectEndpoints
     {
         var route = "/projects/{projectId:guid}/" + resource;
         if (list)
-            api.MapGet(route, async (Guid projectId, DraupnirDb db) =>
-                await db.Projects.AnyAsync(x => x.Id == projectId)
-                    ? Results.Ok(await db.Set<T>().Where(x => x.ProjectId == projectId).OrderBy(x => x.Id).ToListAsync()) : Missing());
-        api.MapGet(route + "/{id:guid}", async (Guid projectId, Guid id, DraupnirDb db) =>
-            await db.Set<T>().SingleOrDefaultAsync(x => x.ProjectId == projectId && x.Id == id) is { } entity
-                ? Results.Ok(entity) : Missing());
-        api.MapPost(route, (Guid projectId, T input, DraupnirDb db) => SaveChild(projectId, null, input, resource, db));
-        api.MapPut(route + "/{id:guid}", (Guid projectId, Guid id, T input, DraupnirDb db) => SaveChild(projectId, id, input, resource, db));
+            api.MapGet(route, async (Guid projectId, ClaimsPrincipal principal, DraupnirDb db) =>
+            {
+                if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+                if (!await db.Projects.AnyAsync(x => x.Id == projectId)) return Missing();
+                if (!await Access.CanProject(db, user, projectId)) return Access.Forbidden();
+                return Results.Ok(await db.Set<T>().Where(x => x.ProjectId == projectId).OrderBy(x => x.Id).ToListAsync());
+            });
+        api.MapGet(route + "/{id:guid}", async (Guid projectId, Guid id, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (!await db.Projects.AnyAsync(x => x.Id == projectId)) return Missing();
+            if (!await Access.CanProject(db, user, projectId)) return Access.Forbidden();
+            return await db.Set<T>().SingleOrDefaultAsync(x => x.ProjectId == projectId && x.Id == id) is { } entity
+                ? Results.Ok(entity) : Missing();
+        });
+        api.MapPost(route, (Guid projectId, T input, ClaimsPrincipal principal, DraupnirDb db) =>
+            SaveChild(projectId, null, input, resource, principal, db));
+        api.MapPut(route + "/{id:guid}", (Guid projectId, Guid id, T input, ClaimsPrincipal principal, DraupnirDb db) =>
+            SaveChild(projectId, id, input, resource, principal, db));
     }
 
-    private static async Task<IResult> SaveChild<T>(Guid projectId, Guid? id, T input, string resource, DraupnirDb db)
-        where T : class, IProjectChild
+    private static async Task<IResult> SaveChild<T>(Guid projectId, Guid? id, T input, string resource,
+        ClaimsPrincipal principal, DraupnirDb db) where T : class, IProjectChild
     {
+        if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+        if (!await db.Projects.AnyAsync(p => p.Id == projectId)) return Missing();
+        if (!await Access.CanProject(db, user, projectId)) return Access.Forbidden();
         if (Validate(input) is { } invalid) return invalid;
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         if (await db.Projects.FindAsync(projectId) is not { } project) return Missing();
@@ -134,15 +181,17 @@ public static class ProjectEndpoints
         id is null ? Task.FromResult(true) : db.Set<T>().AnyAsync(x => x.Id == id && x.ProjectId == projectId);
 
     private static async Task<IResult> ListWorkItems(Guid projectId, WorkStatus? status, WorkType? type, Guid? sprintId,
-        string? q, int? page, int? pageSize, DraupnirDb db)
+        string? q, int? page, int? pageSize, ClaimsPrincipal principal, DraupnirDb db)
     {
+        if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+        if (!await db.Projects.AnyAsync(x => x.Id == projectId)) return Missing();
+        if (!await Access.CanProject(db, user, projectId)) return Access.Forbidden();
         var number = page ?? 1;
         var size = pageSize ?? 25;
         if (number < 1 || size is < 1 or > 100 || (long)(number - 1) * size > int.MaxValue)
             return Invalid("page", "Page must be positive and pageSize must be 1–100.");
         if ((status.HasValue && !Enum.IsDefined(status.Value)) || (type.HasValue && !Enum.IsDefined(type.Value)))
             return Invalid("filter", "Unknown work item status or type.");
-        if (!await db.Projects.AnyAsync(x => x.Id == projectId)) return Missing();
         var query = db.WorkItems.Where(x => x.ProjectId == projectId);
         if (status is { } selectedStatus) query = query.Where(x => x.Status == selectedStatus);
         if (type is { } selectedType) query = query.Where(x => x.Type == selectedType);
@@ -158,10 +207,12 @@ public static class ProjectEndpoints
         return Results.Ok(new { items, total, page = number, pageSize = size });
     }
 
-    private static async Task<IResult> AddDependency(Guid id, DependencyInput input, DraupnirDb db)
+    private static async Task<IResult> AddDependency(Guid id, DependencyInput input, ClaimsPrincipal principal, DraupnirDb db)
     {
+        if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         if (await db.WorkItems.FindAsync(id) is not { } item) return Missing();
+        if (!await Access.CanProject(db, user, item.ProjectId)) return Access.Forbidden();
         if (input.DependsOnId is not { } target) return Invalid("dependsOnId", "A dependency is required.");
         if (await db.WorkItems.FindAsync(target) is not { } dependency || dependency.ProjectId != item.ProjectId)
             return Invalid("dependsOnId", "The dependency must belong to the same project.");

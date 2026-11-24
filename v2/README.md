@@ -30,6 +30,18 @@ dotnet run --project src/Draupnir.Api --no-build --no-restore
 
 The OpenAPI document is /openapi/v1.json. Sign in with a JSON email and password at POST /api/auth/login. Keep the returned session cookie on subsequent /api requests. GET /api/auth/me reads the current account and POST /api/auth/logout clears the cookie. Gate decisions at POST /api/gates/{id}/decision require that account. Agent and Supervisor data arrive through import.
 
+### Users and project membership
+
+Draupnir now has local accounts with `Admin` and `Member` roles. The seeded administrator is Admin. Admin can list/create/disable users and reset passwords through `GET/POST /api/users` and `PATCH /api/users/{id}`; the UI is `/users`. Admin adds or removes project members through `GET/POST /api/projects/{id}/members` and `DELETE /api/projects/{id}/members/{userId}`; the project overview shows the members panel to Admin.
+
+A Member can see and edit only projects they belong to. A foreign project is `403` (not `404`), and `/api/projects` excludes it from the list. Members cannot create/archive projects, manage users or members, or decide a Human Gate. The gate buttons are hidden for Members, and the API also enforces Admin-only decisions. User, membership, and gate changes write an `AuditLog` row.
+
+SSO/OIDC is intentionally out of scope and blocked on an external identity provider; see `adr/ADR-006-draupnir-multi-user.md`.
+
+### Spool results
+
+`POST /api/projects/{id}/spool-results` accepts a `spool-result/v1` JSON body (`schema`, `command`, `status`, `exitCode`, `findings`, `counts`, optional `affectedTraces`). It stores a `Trace` evidence row named after the command, with the original JSON in `data`; `status=pass` maps to `Pass`, `status=fail` to `Fail`. A SHA-256 of the payload makes re-import idempotent. `GET /api/projects/{id}/spool-results` and the Evidence page show the command, status, counts and affected traces. Invalid schema/status/arrays are `400`.
+
 POST /api/import/supervisor accepts either Supervisor queue.json or delivery state/tasks.json as a JSON body. Pass ?projectId=... to associate the payload with an existing project. Otherwise import matches the task repository to a project or creates a project for it. Reimport updates identified records and preserves human decisions. A reviewer assignment by itself does not produce a verdict.
 
 GET /api/projects/{id}/work-items accepts status, type, sprintId, q, page, and pageSize. It returns items, total, page, and pageSize. DELETE /api/projects/{id} archives the project. The dashboard activeSprintCompletionRate is a percentage from 0 to 100.
@@ -44,7 +56,7 @@ dotnet build --no-restore
 dotnet test --no-build --no-restore
 ~~~
 
-Integration tests use WebApplicationFactory and PostgreSQL. The test connection defaults to the local postgres maintenance database at port 55432. DRAUPNIR_TEST_POSTGRES overrides it. The integration test fixture creates, migrates, and removes its own draupnir_test_<guid> database. To include actual DOCX rendering in the report test, set DRAUPNIR_TEST_STYLUS_EXECUTABLE to a local Stylus executable.
+Integration tests use WebApplicationFactory and PostgreSQL. The test connection defaults to the local postgres maintenance database at port 55432. DRAUPNIR_TEST_POSTGRES overrides it. The integration test fixture creates, migrates, and removes its own draupnir_test_<guid> database. Current tests: API 22/22, Web 31/31, Playwright 2/2 (desktop and 360px); the E2E now includes Bug severity and a two-user access check; Spool evidence is covered by API/Web tests. To include actual DOCX rendering in the report test, set DRAUPNIR_TEST_STYLUS_EXECUTABLE to a local Stylus executable.
 
 ## Web（Nuxt 4）
 
@@ -65,7 +77,7 @@ npm run dev          # http://localhost:3000
 
 Sign in with `DRAUPNIR_ADMIN_EMAIL` / `DRAUPNIR_ADMIN_PASSWORD` configured for the API process.
 
-Pages: login, project list, project dashboard, requirements, work items (table and drag/keyboard Kanban), sprints and milestones, agent runs, evidence and reviews, human gates (approval/rejection requires a confirmation dialog), delivery reports (Markdown view and Stylus YAML download), and Supervisor import. All UI text is Traditional Chinese. Loading, empty, and error states are implemented; `409`/`400` ProblemDetails are mapped to readable Chinese messages, and `401` redirects to the login page.
+Pages: login, project list, project dashboard, requirements, work items (table and drag/keyboard Kanban, Bug severity), sprints and milestones, agent runs, evidence and reviews (including Spool trace evidence), human gates (approval/rejection requires a confirmation dialog and is Admin-only), delivery reports (Markdown view and Stylus YAML download), Supervisor import, and `/users` (Admin only). The project overview has an Admin-only members panel. All UI text is Traditional Chinese. Loading, empty, and error states are implemented; `409`/`400` ProblemDetails are mapped to readable Chinese messages, and `401` redirects to the login page.
 
 ### Web checks
 
@@ -81,7 +93,7 @@ npm run build        # production build (.output)
 `npm run test:e2e` builds the web app, starts the Nuxt server with `NUXT_API_BASE`, and runs Playwright on desktop (1280) and mobile (360). It expects:
 
 - PostgreSQL running on `127.0.0.1:55432` (see “Start PostgreSQL and migrate”).
-- The API running at `http://127.0.0.1:5080` with an administrator configured and a migrated database (use a dedicated database such as `draupnir_e2e`; the E2E run creates projects and imports Supervisor data).
+- The API running at `http://127.0.0.1:5080` with an administrator configured and a migrated database (use a dedicated database such as `draupnir_e2e`; the E2E run creates projects, a Bug with severity, a second Member, and imports Supervisor data).
 - Optional env: `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` (defaults `admin@draupnir.local` / `Draupnir!2026`), `NUXT_API_BASE`, `E2E_PORT`.
 
 ~~~powershell

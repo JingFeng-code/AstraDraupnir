@@ -99,7 +99,7 @@ test.describe('Draupnir V2 交付流程（真實 API + PostgreSQL）', () => {
     await page.getByTestId('work-item-title').fill('E2E 嚴重缺陷')
     await page.getByTestId('work-item-submit').click()
     await expect(page.getByTestId(`work-item-row-${key}-3`)).toBeVisible()
-    await expect(page.getByTestId(`work-item-severity-${key}-3`)).toContainText('S2')
+    await expect(page.getByTestId(`severity-select-${key}-3`)).toHaveValue('S2')
 
     // 5. 加入相依：第二個工作相依於第一個
     const secondRow = page.getByTestId(`work-item-row-${key}-2`)
@@ -168,8 +168,26 @@ test.describe('Draupnir V2 交付流程（真實 API + PostgreSQL）', () => {
     await page.getByRole('link', { name: '專案', exact: true }).click()
     await expect(page.getByTestId(`project-card-${key}`)).toBeVisible()
 
+    // 14. Admin creates a Member; that Member must not see the admin's project.
+    const memberEmail = `e2e-member-${key.toLowerCase()}@example.test`
+    const memberPassword = 'Member!2026'
+    await page.getByRole('link', { name: '使用者', exact: true }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('使用者')
+    await page.getByTestId('user-email').fill(memberEmail)
+    await page.getByTestId('user-display-name').fill('E2E Member')
+    await page.getByTestId('user-password').fill(memberPassword)
+    await page.getByTestId('user-submit').click()
+    await expect(page.getByTestId(`user-row-${memberEmail}`)).toBeVisible()
+
+    await page.getByRole('button', { name: '登出' }).click()
+    await page.getByTestId('login-email').fill(memberEmail)
+    await page.getByTestId('login-password').fill(memberPassword)
+    await page.getByTestId('login-submit').click()
+    await expect(page).toHaveURL(/\/projects$/)
+    await expect(page.getByTestId(`project-card-${key}`)).toHaveCount(0)
+
     await testInfo.attach('e2e-summary', {
-      body: JSON.stringify({ projectId, key, projectName, tasks: queue.tasks.length }, null, 2),
+      body: JSON.stringify({ projectId, key, projectName, tasks: queue.tasks.length, memberEmail }, null, 2),
       contentType: 'application/json',
     })
   })

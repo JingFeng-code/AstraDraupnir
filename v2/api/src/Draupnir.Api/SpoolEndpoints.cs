@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -12,16 +13,21 @@ public static class SpoolEndpoints
     public static void MapSpoolEndpoints(this RouteGroupBuilder api)
     {
         api.MapPost("/projects/{projectId:guid}/spool-results", Import);
-        api.MapGet("/projects/{projectId:guid}/spool-results", async (Guid projectId, DraupnirDb db) =>
-            await db.Projects.AnyAsync(p => p.Id == projectId)
-                ? Results.Ok(await db.Evidence.Where(e => e.ProjectId == projectId && e.SpoolResultHash != null)
-                    .OrderByDescending(e => e.RecordedAt).ToListAsync())
-                : Missing());
+        api.MapGet("/projects/{projectId:guid}/spool-results", async (Guid projectId, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (!await db.Projects.AnyAsync(p => p.Id == projectId)) return Missing();
+            if (!await Access.CanProject(db, user, projectId)) return Access.Forbidden();
+            return Results.Ok(await db.Evidence.Where(e => e.ProjectId == projectId && e.SpoolResultHash != null)
+                .OrderByDescending(e => e.RecordedAt).ToListAsync());
+        });
     }
 
-    private static async Task<IResult> Import(Guid projectId, HttpRequest request, DraupnirDb db)
+    private static async Task<IResult> Import(Guid projectId, HttpRequest request, ClaimsPrincipal principal, DraupnirDb db)
     {
+        if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
         if (!await db.Projects.AnyAsync(p => p.Id == projectId)) return Missing();
+        if (!await Access.CanProject(db, user, projectId)) return Access.Forbidden();
         using var reader = new StreamReader(request.Body, Encoding.UTF8);
         var body = await reader.ReadToEndAsync();
         if (body.Length == 0) return Invalid("body", "A spool-result/v1 JSON object is required.");

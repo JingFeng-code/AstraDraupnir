@@ -159,6 +159,57 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
     }
 
     [Fact]
+    public async Task MultiUserAuthorizationMatrixAndAudit()
+    {
+        using var admin = await AuthorizedClient();
+        var allowed = await NewProject(admin, "MEMBER");
+        var foreign = await NewProject(admin, "FOREIGN");
+        var email = $"member-{Guid.NewGuid():N}@example.test";
+        const string initialPassword = "member-pass-1";
+        const string newPassword = "member-pass-2";
+        var created = await Json(await admin.PostAsJsonAsync("/api/users",
+            new { email, displayName = "Member One", password = initialPassword, role = "Member" }));
+        Assert.Equal("Member", created.GetProperty("role").GetString());
+        Assert.True(created.GetProperty("isActive").GetBoolean());
+        var memberId = created.GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/projects/{allowed}/members",
+            new { userId = memberId })).StatusCode);
+
+        using var member = NewClient();
+        await LoginAs(member, email, initialPassword);
+        var listed = await Json(await member.GetAsync("/api/projects"));
+        Assert.Contains(listed.EnumerateArray(), item => item.GetProperty("id").GetGuid() == allowed);
+        Assert.DoesNotContain(listed.EnumerateArray(), item => item.GetProperty("id").GetGuid() == foreign);
+        Assert.Equal(HttpStatusCode.OK, (await member.GetAsync($"/api/projects/{allowed}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await member.GetAsync($"/api/projects/{foreign}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await member.PostAsJsonAsync("/api/projects", new { key = "NOPE", name = "Nope" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await member.GetAsync("/api/users")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await member.PostAsJsonAsync($"/api/projects/{allowed}/members", new { userId = memberId })).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await member.PostAsJsonAsync($"/api/projects/{allowed}/requirements",
+            new { code = "REQ-1", title = "Member can edit", priority = "P2" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await member.PostAsJsonAsync($"/api/projects/{foreign}/requirements",
+            new { code = "REQ-1", title = "No access", priority = "P2" })).StatusCode);
+        var gate = await Json(await admin.PostAsJsonAsync($"/api/projects/{allowed}/gates", new { title = "Member cannot approve" }));
+        Assert.Equal(HttpStatusCode.Forbidden, (await member.PostAsJsonAsync($"/api/gates/{gate.GetProperty("id")}/decision",
+            new { approved = true })).StatusCode);
+        await Json(await admin.PostAsJsonAsync($"/api/gates/{gate.GetProperty("id")}/decision", new { approved = true }));
+
+        var audit = await Json(await admin.GetAsync("/api/audit"));
+        Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "membership.add");
+        Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "user.create");
+        Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "gate.decision");
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/users/{memberId}", new { password = newPassword })).StatusCode);
+        using var oldLogin = NewClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await oldLogin.PostAsJsonAsync("/api/auth/login", new { email, password = initialPassword })).StatusCode);
+        using var newLogin = NewClient();
+        await LoginAs(newLogin, email, newPassword);
+        Assert.Equal(HttpStatusCode.OK, (await newLogin.GetAsync($"/api/projects/{allowed}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/users/{memberId}", new { isActive = false })).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await newLogin.GetAsync($"/api/projects/{allowed}")).StatusCode);
+    }
+
+    [Fact]
     public async Task SingleActiveSprintAndMilestoneAssociationsAreEnforced()
     {
         using var client = await AuthorizedClient();
@@ -292,6 +343,12 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         var response = await client.PostAsJsonAsync("/api/auth/login", new { email = "ADMIN@example.test", password = "local-fixture-password" });
         response.EnsureSuccessStatusCode();
         return response;
+    }
+
+    private static async Task LoginAs(HttpClient client, string email, string password)
+    {
+        var response = await client.PostAsJsonAsync("/api/auth/login", new { email, password });
+        response.EnsureSuccessStatusCode();
     }
     private static async Task<Guid> NewProject(HttpClient client, string key) =>
         (await Json(await client.PostAsJsonAsync("/api/projects", new { key, name = key }))).GetProperty("id").GetGuid();

@@ -2,8 +2,11 @@
 import type { Dashboard, Project } from '~/types/api'
 import { toApiError, type ApiError } from '~/utils/errors'
 import { projectStatusLabels, workStatusLabels } from '~/utils/labels'
+import { canCreateProjects } from '~/utils/permissions'
 
 const api = useApi()
+const auth = useAuth()
+const canCreate = computed(() => canCreateProjects(auth.state.value.user))
 
 interface ProjectCardData {
   project: Project
@@ -81,12 +84,12 @@ onMounted(load)
         <h1 class="mt-1 text-3xl font-bold text-ink">專案</h1>
         <p class="mt-1 text-sm text-ink-muted">建立專案、追蹤需求與工作項目，並管理 Agent 交付。</p>
       </div>
-      <button type="button" class="btn btn-primary" data-testid="new-project" @click="formOpen = !formOpen">
+      <button v-if="canCreate" type="button" class="btn btn-primary" data-testid="new-project" @click="formOpen = !formOpen">
         {{ formOpen ? '收起表單' : '新增專案' }}
       </button>
     </div>
 
-    <form v-if="formOpen" class="panel mt-6 space-y-4 p-6" data-testid="project-form" @submit.prevent="createProject">
+    <form v-if="canCreate && formOpen" class="panel mt-6 space-y-4 p-6" data-testid="project-form" @submit.prevent="createProject">
       <h2 class="text-lg font-bold text-ink">新增專案</h2>
       <div class="grid gap-4 sm:grid-cols-3">
         <div>

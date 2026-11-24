@@ -11,13 +11,19 @@ public static class DeliveryEndpoints
 {
     public static void MapDeliveryEndpoints(this RouteGroupBuilder api)
     {
-        api.MapGet("/projects/{projectId:guid}/gates", async (Guid projectId, DraupnirDb db) =>
-            await db.Projects.AnyAsync(p => p.Id == projectId)
-                ? Results.Ok(await db.Gates.Where(x => x.ProjectId == projectId).OrderBy(x => x.Title).ToListAsync()) : Missing());
-        api.MapPost("/projects/{projectId:guid}/gates", async (Guid projectId, GateInput input, DraupnirDb db) =>
+        api.MapGet("/projects/{projectId:guid}/gates", async (Guid projectId, ClaimsPrincipal principal, DraupnirDb db) =>
         {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (!await db.Projects.AnyAsync(p => p.Id == projectId)) return Missing();
+            if (!await Access.CanProject(db, user, projectId)) return Access.Forbidden();
+            return Results.Ok(await db.Gates.Where(x => x.ProjectId == projectId).OrderBy(x => x.Title).ToListAsync());
+        });
+        api.MapPost("/projects/{projectId:guid}/gates", async (Guid projectId, GateInput input, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
             if (string.IsNullOrWhiteSpace(input.Title)) return Invalid("title", "A title is required.");
             if (!await db.Projects.AnyAsync(p => p.Id == projectId)) return Missing();
+            if (!await Access.CanProject(db, user, projectId)) return Access.Forbidden();
             if (input.WorkItemId is { } id && !await db.WorkItems.AnyAsync(w => w.Id == id && w.ProjectId == projectId))
                 return Invalid("workItemId", "Work item must belong to the project.");
             var gate = new HumanGate { Id = Guid.NewGuid(), Title = input.Title, ProjectId = projectId,
@@ -28,81 +34,157 @@ public static class DeliveryEndpoints
         });
         api.MapPost("/gates/{id:guid}/decision", async (Guid id, GateDecision input, ClaimsPrincipal principal, DraupnirDb db) =>
         {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (!Access.IsAdmin(user)) return Access.Forbidden();
             if (input.Approved is not { } approved) return Invalid("approved", "A decision is required.");
-            if (!Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
-                || !await db.Users.AnyAsync(x => x.Id == userId)) return Results.Problem(statusCode: 401);
             if (await db.Gates.FindAsync(id) is not { } gate) return Missing();
             if (gate.Status != GateStatus.Pending) return Conflict("This gate already has a human decision.");
             gate.Status = approved ? GateStatus.Approved : GateStatus.Rejected;
-            gate.DecidedBy = userId;
+            gate.DecidedBy = user.Id;
             gate.DecidedAt = DateTimeOffset.UtcNow;
             gate.Note = input.Note;
+            await Access.Audit(db, user.Id, "gate.decision", "gate", gate.Id, $"{gate.Status}; project={gate.ProjectId}");
             await db.SaveChangesAsync();
             return Results.Ok(gate);
         });
 
-        api.MapGet("/agent-runs", async (Guid? projectId, Guid? workItemId, DraupnirDb db) =>
-            await Runs(db, projectId, workItemId).OrderByDescending(x => x.FinishedAt ?? x.StartedAt)
-                .ThenByDescending(x => x.Attempt).ThenBy(x => x.Id).ToListAsync());
-        api.MapGet("/evidence", async (Guid? projectId, Guid? workItemId, DraupnirDb db) =>
-            await db.Evidence.Where(e => (!workItemId.HasValue || e.WorkItemId == workItemId ||
-                db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.WorkItemId == workItemId)) &&
-                (!projectId.HasValue || e.ProjectId == projectId ||
-                db.WorkItems.Any(w => w.Id == e.WorkItemId && w.ProjectId == projectId) ||
-                db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.ProjectId == projectId)))
-                .OrderByDescending(e => e.RecordedAt).ToListAsync());
-        api.MapGet("/reviews", async (Guid? projectId, Guid? workItemId, DraupnirDb db) =>
-            await db.Reviews.Where(e => (!workItemId.HasValue || e.WorkItemId == workItemId ||
-                db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.WorkItemId == workItemId)) &&
-                (!projectId.HasValue || db.WorkItems.Any(w => w.Id == e.WorkItemId && w.ProjectId == projectId) ||
-                db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.ProjectId == projectId)))
-                .OrderByDescending(e => e.CreatedAt).ToListAsync());
-
-        api.MapPost("/import/supervisor", SupervisorImport.Import);
-        api.MapGet("/dashboard", async (Guid? projectId, DraupnirDb db) =>
+        api.MapGet("/agent-runs", async (Guid? projectId, Guid? workItemId, ClaimsPrincipal principal, DraupnirDb db) =>
         {
-            if (projectId is { } id && !await db.Projects.AnyAsync(p => p.Id == id)) return Missing();
-            return Results.Ok(await Dashboard(db, projectId));
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (projectId is { } selected && !await Access.CanProject(db, user, selected)) return Access.Forbidden();
+            if (workItemId is { } itemId)
+            {
+                if (await db.WorkItems.FindAsync(itemId) is not { } item) return Missing();
+                if (!await Access.CanProject(db, user, item.ProjectId)) return Access.Forbidden();
+            }
+            var visible = await Access.VisibleProjectIds(db, user);
+            return Results.Ok(await Runs(db, projectId, workItemId, Access.IsAdmin(user), visible)
+                .OrderByDescending(x => x.FinishedAt ?? x.StartedAt)
+                .ThenByDescending(x => x.Attempt).ThenBy(x => x.Id).ToListAsync());
         });
-        api.MapGet("/projects/{projectId:guid}/reports", async (Guid projectId, DraupnirDb db) =>
-            await db.Projects.AnyAsync(p => p.Id == projectId) ? Results.Ok(await db.Reports
-                .Where(r => r.ProjectId == projectId).OrderByDescending(r => r.GeneratedAt)
-                .Select(r => new { r.Id, r.ProjectId, r.Title, r.GeneratedAt, r.DocxPath }).ToListAsync()) : Missing());
+        api.MapGet("/evidence", async (Guid? projectId, Guid? workItemId, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (projectId is { } selected && !await Access.CanProject(db, user, selected)) return Access.Forbidden();
+            if (workItemId is { } itemId)
+            {
+                if (await db.WorkItems.FindAsync(itemId) is not { } item) return Missing();
+                if (!await Access.CanProject(db, user, item.ProjectId)) return Access.Forbidden();
+            }
+            var visible = await Access.VisibleProjectIds(db, user);
+            return Results.Ok(await Evidence(db, projectId, workItemId, Access.IsAdmin(user), visible)
+                .OrderByDescending(e => e.RecordedAt).ToListAsync());
+        });
+        api.MapGet("/reviews", async (Guid? projectId, Guid? workItemId, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (projectId is { } selected && !await Access.CanProject(db, user, selected)) return Access.Forbidden();
+            if (workItemId is { } itemId)
+            {
+                if (await db.WorkItems.FindAsync(itemId) is not { } item) return Missing();
+                if (!await Access.CanProject(db, user, item.ProjectId)) return Access.Forbidden();
+            }
+            var visible = await Access.VisibleProjectIds(db, user);
+            return Results.Ok(await Reviews(db, projectId, workItemId, Access.IsAdmin(user), visible)
+                .OrderByDescending(e => e.CreatedAt).ToListAsync());
+        });
+
+        api.MapPost("/import/supervisor", async (JsonElement payload, Guid? projectId, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (projectId is { } selected)
+            {
+                if (!await Access.CanProject(db, user, selected)) return Access.Forbidden();
+            }
+            else if (!Access.IsAdmin(user)) return Access.Forbidden();
+            return await SupervisorImport.Import(payload, projectId, db);
+        });
+
+        api.MapGet("/dashboard", async (Guid? projectId, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (projectId is { } selected && !await Access.CanProject(db, user, selected)) return Access.Forbidden();
+            var visible = await Access.VisibleProjectIds(db, user);
+            return Results.Ok(await Dashboard(db, projectId, Access.IsAdmin(user), visible));
+        });
+
+        api.MapGet("/projects/{projectId:guid}/reports", async (Guid projectId, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (!await db.Projects.AnyAsync(p => p.Id == projectId)) return Missing();
+            if (!await Access.CanProject(db, user, projectId)) return Access.Forbidden();
+            return Results.Ok(await db.Reports.Where(r => r.ProjectId == projectId).OrderByDescending(r => r.GeneratedAt)
+                .Select(r => new { r.Id, r.ProjectId, r.Title, r.GeneratedAt, r.DocxPath }).ToListAsync());
+        });
         api.MapPost("/projects/{projectId:guid}/reports", CreateReport);
-        api.MapGet("/reports/{id:guid}/markdown", async (Guid id, DraupnirDb db) =>
-            await db.Reports.FindAsync(id) is { } report ? Results.Text(report.MarkdownBody, "text/markdown", Encoding.UTF8) : Missing());
-        api.MapGet("/reports/{id:guid}/stylus.yaml", async (Guid id, DraupnirDb db) =>
-            await db.Reports.FindAsync(id) is { } report ? Results.Text(report.StylusSpecYaml, "application/yaml", Encoding.UTF8) : Missing());
+        api.MapGet("/reports/{id:guid}/markdown", async (Guid id, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (await db.Reports.FindAsync(id) is not { } report) return Missing();
+            if (!await Access.CanProject(db, user, report.ProjectId)) return Access.Forbidden();
+            return Results.Text(report.MarkdownBody, "text/markdown", Encoding.UTF8);
+        });
+        api.MapGet("/reports/{id:guid}/stylus.yaml", async (Guid id, ClaimsPrincipal principal, DraupnirDb db) =>
+        {
+            if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+            if (await db.Reports.FindAsync(id) is not { } report) return Missing();
+            if (!await Access.CanProject(db, user, report.ProjectId)) return Access.Forbidden();
+            return Results.Text(report.StylusSpecYaml, "application/yaml", Encoding.UTF8);
+        });
     }
 
-    private static IQueryable<AgentRun> Runs(DraupnirDb db, Guid? projectId, Guid? workItemId) =>
-        db.AgentRuns.Where(run => (!projectId.HasValue || run.ProjectId == projectId ||
-            db.WorkItems.Any(w => w.Id == run.WorkItemId && w.ProjectId == projectId)) &&
-            (!workItemId.HasValue || run.WorkItemId == workItemId));
+    private static IQueryable<AgentRun> Runs(DraupnirDb db, Guid? projectId, Guid? workItemId, bool admin, List<Guid> visible) =>
+        db.AgentRuns.Where(run => (!projectId.HasValue || run.ProjectId == projectId) &&
+            (!workItemId.HasValue || run.WorkItemId == workItemId) &&
+            (admin || (run.ProjectId.HasValue && visible.Contains(run.ProjectId.Value)) ||
+             db.WorkItems.Any(w => w.Id == run.WorkItemId && visible.Contains(w.ProjectId))));
 
-    private static async Task<DashboardData> Dashboard(DraupnirDb db, Guid? projectId)
+    private static IQueryable<Evidence> Evidence(DraupnirDb db, Guid? projectId, Guid? workItemId, bool admin, List<Guid> visible) =>
+        db.Evidence.Where(e => (!workItemId.HasValue || e.WorkItemId == workItemId ||
+            db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.WorkItemId == workItemId)) &&
+            (!projectId.HasValue || e.ProjectId == projectId ||
+            db.WorkItems.Any(w => w.Id == e.WorkItemId && w.ProjectId == projectId) ||
+            db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.ProjectId == projectId)) &&
+            (admin || (e.ProjectId.HasValue && visible.Contains(e.ProjectId.Value)) ||
+             db.WorkItems.Any(w => w.Id == e.WorkItemId && visible.Contains(w.ProjectId)) ||
+             db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.ProjectId.HasValue && visible.Contains(r.ProjectId.Value))));
+
+    private static IQueryable<Review> Reviews(DraupnirDb db, Guid? projectId, Guid? workItemId, bool admin, List<Guid> visible) =>
+        db.Reviews.Where(e => (!workItemId.HasValue || e.WorkItemId == workItemId ||
+            db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.WorkItemId == workItemId)) &&
+            (!projectId.HasValue || db.WorkItems.Any(w => w.Id == e.WorkItemId && w.ProjectId == projectId) ||
+            db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.ProjectId == projectId)) &&
+            (admin || db.WorkItems.Any(w => w.Id == e.WorkItemId && visible.Contains(w.ProjectId)) ||
+             db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.ProjectId.HasValue && visible.Contains(r.ProjectId.Value))));
+
+    private static async Task<DashboardData> Dashboard(DraupnirDb db, Guid? projectId, bool admin, List<Guid> visible)
     {
-        var items = db.WorkItems.Where(w => !projectId.HasValue || w.ProjectId == projectId);
+        var items = db.WorkItems.Where(w => projectId.HasValue ? w.ProjectId == projectId : admin || visible.Contains(w.ProjectId));
         var grouped = await items.GroupBy(w => w.Status).Select(g => new { Status = g.Key, Count = g.Count() }).ToListAsync();
         var statusCounts = Enum.GetValues<WorkStatus>().ToDictionary(x => x.ToString(),
             status => grouped.FirstOrDefault(g => g.Status == status)?.Count ?? 0);
-        var active = db.Sprints.Where(s => s.Status == SprintStatus.Active && (!projectId.HasValue || s.ProjectId == projectId));
+        var active = db.Sprints.Where(s => s.Status == SprintStatus.Active &&
+            (projectId.HasValue ? s.ProjectId == projectId : admin || visible.Contains(s.ProjectId)));
         var activeItems = items.Where(w => active.Any(s => s.Id == w.SprintId));
         var total = await activeItems.CountAsync();
         var done = await activeItems.CountAsync(w => w.Status == WorkStatus.Done);
         return new(statusCounts, total == 0 ? 0 : Math.Round(100m * done / total, 2), done, total,
             await items.Where(w => w.Status == WorkStatus.Blocked).OrderBy(w => w.Code).ToListAsync(),
-            await db.Gates.Where(g => g.Status == GateStatus.Pending && (!projectId.HasValue || g.ProjectId == projectId))
+            await db.Gates.Where(g => g.Status == GateStatus.Pending &&
+                (projectId.HasValue ? g.ProjectId == projectId : admin || visible.Contains(g.ProjectId)))
                 .OrderBy(g => g.Title).ToListAsync(),
-            await Runs(db, projectId, null).OrderByDescending(r => r.FinishedAt ?? r.StartedAt ?? DateTimeOffset.MinValue)
+            await Runs(db, projectId, null, admin, visible).OrderByDescending(r => r.FinishedAt ?? r.StartedAt ?? DateTimeOffset.MinValue)
                 .ThenByDescending(r => r.Attempt).ThenBy(r => r.Id).Take(10).ToListAsync());
     }
 
-    private static async Task<IResult> CreateReport(Guid projectId, ReportInput? input, DraupnirDb db,
+    private static async Task<IResult> CreateReport(Guid projectId, ReportInput? input, ClaimsPrincipal principal, DraupnirDb db,
         IConfiguration config, ILoggerFactory loggerFactory, CancellationToken cancellation)
     {
+        if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+        if (!await Access.CanProject(db, user, projectId)) return Access.Forbidden();
         if (await db.Projects.FindAsync(projectId) is not { } project) return Missing();
-        var data = await Dashboard(db, projectId);
+        var visible = await Access.VisibleProjectIds(db, user);
+        var data = await Dashboard(db, projectId, Access.IsAdmin(user), visible);
         var title = string.IsNullOrWhiteSpace(input?.Title) ? $"{project.Name} delivery report" : input.Title.Trim();
         var summary = string.Join(", ", data.StatusCounts.Select(x => $"{x.Key}: {x.Value}"));
         var sections = new (string Heading, string Text)[]
@@ -113,10 +195,10 @@ public static class DeliveryEndpoints
             ("Recent agent runs", Lines(data.RecentAgentRuns.Select(x => $"{x.ExternalTaskId} · {x.Agent} · {x.Status}"))),
             ("Evidence", Lines(await db.Evidence.Where(e => e.ProjectId == projectId
                 || db.WorkItems.Any(w => w.Id == e.WorkItemId && w.ProjectId == projectId)
-                || Runs(db, projectId, null).Any(r => r.Id == e.AgentRunId)).OrderByDescending(e => e.RecordedAt).Take(30)
+                || Runs(db, projectId, null, Access.IsAdmin(user), visible).Any(r => r.Id == e.AgentRunId)).OrderByDescending(e => e.RecordedAt).Take(30)
                 .Select(e => e.Title + " · " + (e.Path ?? e.Url ?? "")).ToListAsync())),
             ("Reviews", Lines((await db.Reviews.Where(e => db.WorkItems.Any(w => w.Id == e.WorkItemId && w.ProjectId == projectId)
-                || Runs(db, projectId, null).Any(r => r.Id == e.AgentRunId)).OrderByDescending(e => e.CreatedAt).Take(30)
+                || Runs(db, projectId, null, Access.IsAdmin(user), visible).Any(r => r.Id == e.AgentRunId)).OrderByDescending(e => e.CreatedAt).Take(30)
                 .ToListAsync()).Select(r => $"{r.Reviewer} · {r.Verdict}")))
         };
         var blocks = new List<object> { new { type = "toc", title = "Contents", levels = 2 } };

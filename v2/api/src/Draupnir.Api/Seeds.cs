@@ -18,7 +18,7 @@ public static class Seeds
             var existing = await db.Users.OrderBy(user => user.CreatedAt).FirstOrDefaultAsync();
             if (existing is null)
             {
-                var user = new User { Email = email, DisplayName = "Administrator" };
+                var user = new User { Email = email, DisplayName = "Administrator", Role = UserRole.Admin, IsActive = true };
                 user.PasswordHash = services.GetRequiredService<IPasswordHasher<User>>().HashPassword(user, password);
                 db.Users.Add(user);
                 await db.SaveChangesAsync();

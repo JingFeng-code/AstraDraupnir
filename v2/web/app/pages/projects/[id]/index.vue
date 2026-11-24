@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import type { Dashboard } from '~/types/api'
+import type { Dashboard, ProjectMember, User } from '~/types/api'
 import { toApiError, type ApiError } from '~/utils/errors'
 import { boardColumns, workStatusLabels } from '~/utils/labels'
 import { formatDateTime, relativeTime } from '~/utils/format'
+import { canManageUsers } from '~/utils/permissions'
 
 const route = useRoute()
 const api = useApi()
+const auth = useAuth()
+const admin = computed(() => canManageUsers(auth.state.value.user))
+const members = ref<ProjectMember[]>([])
+const users = ref<User[]>([])
+const memberToAdd = ref('')
+const memberError = ref<string | null>(null)
 const project = inject<Ref<import('~/types/api').Project | null> | null>('project', null)
 const id = computed(() => String(route.params.id))
 
@@ -25,7 +32,41 @@ async function load() {
   }
 }
 
-watch(id, load, { immediate: true })
+async function loadMembers() {
+  if (!admin.value) return
+  try {
+    [members.value, users.value] = await Promise.all([
+      api.get<ProjectMember[]>(`/api/projects/${id.value}/members`),
+      api.get<User[]>('/api/users'),
+    ])
+  } catch (caught) {
+    memberError.value = toApiError(caught).detail
+  }
+}
+
+async function addMember() {
+  if (!memberToAdd.value) return
+  memberError.value = null
+  try {
+    await api.post(`/api/projects/${id.value}/members`, { userId: memberToAdd.value })
+    memberToAdd.value = ''
+    await loadMembers()
+  } catch (caught) {
+    memberError.value = toApiError(caught).detail
+  }
+}
+
+async function removeMember(userId: string) {
+  memberError.value = null
+  try {
+    await api.del(`/api/projects/${id.value}/members/${userId}`)
+    await loadMembers()
+  } catch (caught) {
+    memberError.value = toApiError(caught).detail
+  }
+}
+
+watch(id, () => { void load(); void loadMembers() }, { immediate: true })
 
 const base = computed(() => `/projects/${id.value}`)
 </script>
@@ -88,6 +129,31 @@ const base = computed(() => `/projects/${id.value}`)
           <p v-else class="mt-3 text-sm text-ink-muted">沒有阻塞項目。</p>
         </section>
       </div>
+
+      <section v-if="admin" class="panel p-5" aria-labelledby="dashboard-members">
+        <h2 id="dashboard-members" class="text-lg font-bold text-ink">專案成員</h2>
+        <p class="mt-1 text-sm text-ink-muted">只有 Admin 可以加入或移除 Member；Member 只看得到被加入的專案。</p>
+        <AppNotice v-if="memberError" class="mt-3" :message="memberError" />
+        <ul v-if="members.length" class="mt-3 divide-y divide-line">
+          <li v-for="member in members" :key="member.id" class="flex flex-wrap items-center justify-between gap-2 py-2" :data-testid="`member-row-${member.email}`">
+            <span class="text-sm text-ink">{{ member.displayName }} <span class="font-mono text-xs text-ink-subtle">{{ member.email }}</span></span>
+            <button type="button" class="text-xs text-[#8a1c1c] underline" @click="removeMember(member.id)">移除</button>
+          </li>
+        </ul>
+        <p v-else class="mt-3 text-sm text-ink-muted">還沒有 Member；Admin 仍可存取所有專案。</p>
+        <form class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="addMember">
+          <div class="min-w-[16rem]">
+            <label for="member-user" class="field-label">加入 Member</label>
+            <select id="member-user" v-model="memberToAdd" class="field-input" data-testid="member-user">
+              <option value="">選擇使用者</option>
+              <option v-for="user in users.filter(candidate => !members.some(member => member.id === candidate.id))" :key="user.id" :value="user.id">
+                {{ user.displayName }}（{{ user.email }}）
+              </option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-secondary" data-testid="member-add">加入</button>
+        </form>
+      </section>
 
       <section class="panel p-5" aria-labelledby="dashboard-runs">
         <div class="flex items-center justify-between gap-2">

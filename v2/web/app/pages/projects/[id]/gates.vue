@@ -3,9 +3,12 @@ import type { HumanGate } from '~/types/api'
 import { toApiError, type ApiError } from '~/utils/errors'
 import { formatDateTime } from '~/utils/format'
 import { gateStatusLabels } from '~/utils/labels'
+import { canApproveGates } from '~/utils/permissions'
 
 const route = useRoute()
 const api = useApi()
+const auth = useAuth()
+const admin = computed(() => canApproveGates(auth.state.value.user))
 const id = computed(() => String(route.params.id))
 
 const gates = ref<HumanGate[]>([])
@@ -96,11 +99,12 @@ watch(id, load, { immediate: true })
             <td class="px-4 py-2 font-mono text-xs text-ink-muted">{{ gate.externalRef ?? '手動建立' }}</td>
             <td class="px-4 py-2 text-xs text-ink-muted">{{ formatDateTime(gate.decidedAt) }}</td>
             <td class="px-4 py-2">
-              <div v-if="gate.status === 'Pending'" class="flex flex-wrap gap-2">
+              <div v-if="gate.status === 'Pending' && admin" class="flex flex-wrap gap-2">
                 <button type="button" class="btn btn-primary" :data-testid="`gate-approve-${gate.id}`" @click="ask(gate, 'approve')">批准</button>
                 <button type="button" class="btn btn-danger" :data-testid="`gate-reject-${gate.id}`" @click="ask(gate, 'reject')">駁回</button>
               </div>
-              <span v-else class="text-xs text-ink-subtle">已決定</span>
+              <span v-else-if="gate.status !== 'Pending'" class="text-xs text-ink-subtle">已決定</span>
+              <span v-else class="text-xs text-ink-subtle">需要 Admin</span>
             </td>
           </tr>
         </tbody>

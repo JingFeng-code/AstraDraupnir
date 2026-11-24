@@ -29,6 +29,7 @@ async function logout() {
 
         <nav v-if="auth.state.value.user" class="flex flex-wrap items-center gap-3 text-sm" aria-label="帳號導覽">
           <NuxtLink to="/projects" class="font-medium text-navy-700 hover:underline">專案</NuxtLink>
+          <NuxtLink v-if="auth.state.value.user?.role === 'Admin'" to="/users" class="font-medium text-navy-700 hover:underline">使用者</NuxtLink>
           <span class="hidden text-ink-subtle sm:inline">{{ auth.state.value.user.email }}</span>
           <button type="button" class="btn btn-secondary" :disabled="loggingOut" @click="logout">
             {{ loggingOut ? '登出中…' : '登出' }}

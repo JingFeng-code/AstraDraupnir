@@ -214,6 +214,26 @@ async function confirmBlocked() {
   await patchStatus(target, 'Blocked', blockedReason.value.trim())
 }
 
+async function updateSeverity(item: WorkItem, event: Event) {
+  const select = event.target as HTMLSelectElement
+  const severity = select.value || null
+  if (item.type !== 'Bug') return
+  busyId.value = item.id
+  clearActionError()
+  try {
+    const updated = await api.put<WorkItem>(`/api/projects/${id.value}/work-items/${item.id}`, {
+      ...item,
+      severity,
+    })
+    const index = items.value.findIndex(candidate => candidate.id === item.id)
+    if (index >= 0) items.value[index] = updated
+  } catch (caught) {
+    setActionError(caught)
+  } finally {
+    busyId.value = null
+  }
+}
+
 function onTableStatusChange(event: Event, item: WorkItem) {
   const select = event.target as HTMLSelectElement
   const status = parseWorkStatus(select.value)
@@ -489,7 +509,19 @@ watch(id, load, { immediate: true })
               </td>
               <td class="px-3 py-3 text-xs text-ink-muted">
                 <p>{{ workTypeLabels[item.type] }} · {{ priorityLabels[item.priority] }}</p>
-                <p v-if="item.type === 'Bug' && item.severity" class="mt-0.5" :data-testid="`work-item-severity-${item.code}`">{{ severityLabels[item.severity].label }}</p>
+                <label v-if="item.type === 'Bug'" class="mt-1 block">
+                  <span class="text-[11px] text-ink-subtle">Bug 嚴重度</span>
+                  <select
+                    class="field-input mt-0.5 py-1 text-xs"
+                    :value="item.severity ?? ''"
+                    :disabled="busyId === item.id"
+                    :data-testid="`severity-select-${item.code}`"
+                    @change="updateSeverity(item, $event)"
+                  >
+                    <option value="">未指定</option>
+                    <option v-for="severity in severityOptions" :key="severity" :value="severity">{{ severityLabels[severity].label }}</option>
+                  </select>
+                </label>
                 <p v-if="item.assignee" class="mt-0.5">{{ assigneeKindLabels[item.assigneeKind] }}：{{ item.assignee }}</p>
               </td>
             </tr>

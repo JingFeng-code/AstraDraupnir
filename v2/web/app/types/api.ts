@@ -14,10 +14,22 @@ export type EvidenceResult = 'Pass' | 'Fail' | 'NotTested' | 'Blocked'
 export type Verdict = 'Pass' | 'ChangesRequested'
 export type GateStatus = 'Pending' | 'Approved' | 'Rejected'
 
+export type UserRole = 'Admin' | 'Member'
+
 export interface User {
   id: string
   email: string
   displayName: string
+  role: UserRole
+  isActive: boolean
+}
+
+export interface ProjectMember {
+  id: string
+  email: string
+  displayName: string
+  role: UserRole
+  isActive: boolean
 }
 
 export interface Project {
