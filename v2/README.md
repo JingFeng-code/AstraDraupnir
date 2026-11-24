@@ -37,6 +37,22 @@ A Member can see and edit only projects they belong to. A foreign project is `40
 
 SSO/OIDC is intentionally out of scope and blocked on an external identity provider; see `adr/ADR-006-draupnir-multi-user.md`.
 
+### Security policy: local development vs. production
+
+The delivery runs on `127.0.0.1` with a local PostgreSQL and a local administrator account. That is the threat model it was tested against. Before any deployment:
+
+| Control | Local development (this delivery) | Before production |
+|---|---|---|
+| Transport | plain HTTP on loopback | TLS everywhere; set `options.Cookie.SecurePolicy = Always` (the code keeps `SameAsRequest` so localhost works) |
+| Session lifetime | 8 hours absolute (`ExpireTimeSpan`, `SlidingExpiration = false`) | same, or shorter; align with the organisation's policy |
+| Session revocation | `User.SecurityStamp` is a cookie claim, rotated on every user change (password, role, active flag); `Access.Current` and `/api/auth/me` reject a stale or missing stamp | same; add a "sign out everywhere" action if needed |
+| Login throttling | 5 failed attempts per e-mail inside 10 minutes → `429` (counted from the audit log; successful logins are unaffected) | keep, and add an IP-based limiter at the edge |
+| Secrets | administrator password only via `DRAUPNIR_ADMIN_EMAIL` / `DRAUPNIR_ADMIN_PASSWORD`; nothing is committed; E2E needs `E2E_ADMIN_PASSWORD` | use a secret manager, rotate the bootstrap password, and remove the seed path once the first admin exists |
+| API schema | `/openapi/v1.json` is anonymous (handy locally) | disable it or put it behind authorization |
+| Roles | `Admin` / `Member` only; no MFA, no SSO/OIDC (ADR-006) | add SSO/MFA through an external identity provider |
+
+The local databases (`draupnir`, `draupnir_design`, `draupnir_v21`) are disposable development data; the administrator passwords for them were rotated at delivery time and are not published in this repository.
+
 ### Spool results
 
 `POST /api/projects/{id}/spool-results` accepts a `spool-result/v1` JSON body (`schema`, `command`, `status`, `exitCode`, `findings`, `counts`, optional `affectedTraces`). It stores a `Trace` evidence row named after the command, with the original JSON in `data`; `status=pass` maps to `Pass`, `status=fail` to `Fail`. A SHA-256 of the payload makes re-import idempotent. `GET /api/projects/{id}/spool-results` and the Evidence page show the command, status, counts and affected traces. Invalid schema/status/arrays are `400`.
