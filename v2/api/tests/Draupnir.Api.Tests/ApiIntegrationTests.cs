@@ -605,6 +605,9 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         // 升級前格式的 Gate（沒有來源實例）
         var legacy = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
             new { title = "Legacy gate", externalRef = "supervisor:LEG-1" }));
+        // 先做一個決策，收購（adoption）後必須保留
+        await Json(await client.PostAsJsonAsync($"/api/gates/{legacy.GetProperty("id")}/decision",
+            new { approved = false, note = "Rejected before the upgrade" }));
         var payload = new
         {
             tasks = new[] { new { id = "LEG-1", title = "Legacy gate", status = "WAITING_HUMAN",
@@ -615,6 +618,8 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         Assert.Single(gates);
         Assert.Equal(legacy.GetProperty("id").GetGuid(), gates[0].GetProperty("id").GetGuid());
         Assert.Contains(":LEGACY:", gates[0].GetProperty("externalRef").GetString());
+        Assert.Equal("Rejected", gates[0].GetProperty("status").GetString());
+        Assert.Equal("Rejected before the upgrade", gates[0].GetProperty("note").GetString());
     }
 
     [Fact]

@@ -25,8 +25,13 @@ public static class SupervisorImport
         // 來源命名空間：明確參數 > payload > 專案上固定的 SourceInstance（第一次匯入時寫入，之後不因改名變動）。
         // 沒有 projectId 且沒有明確值時，保留舊的 repo/worktree 啟發式（見 ResolveSourceInstance）。
         var fixedInstance = FixedSourceInstance(payload, sourceInstance);
-        if (fixedInstance is null && projectId is { } selectedId)
-            fixedInstance = InstanceForProject(projects.First(project => project.Id == selectedId));
+        if (projectId is { } selectedId)
+        {
+            var selected = projects.First(project => project.Id == selectedId);
+            // 即使這次帶了明確的來源實例，也把它固定在專案上：之後不帶參數的匯入才不會換 namespace。
+            selected.SourceInstance ??= fixedInstance ?? selected.Key;
+            fixedInstance ??= selected.SourceInstance;
+        }
         var agents = Get(payload, "agents");
         var seenRuns = new HashSet<Guid>();
         var seenEvidence = new HashSet<Guid>();
