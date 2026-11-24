@@ -10,7 +10,7 @@ namespace Draupnir.Api;
 
 public static class SupervisorImport
 {
-    public static async Task<IResult> Import(JsonElement payload, Guid? projectId, DraupnirDb db)
+    public static async Task<IResult> Import(JsonElement payload, Guid? projectId, DraupnirDb db, Guid? actorUserId = null)
     {
         if (Get(payload, "tasks").ValueKind != JsonValueKind.Array)
             return Invalid("tasks", "Provide a Supervisor object with a tasks array.");
@@ -142,6 +142,8 @@ public static class SupervisorImport
                 seenGates.Add(gate.Id);
             }
         }
+        if (actorUserId is { } actor)
+            db.AuditLogs.Add(new AuditLog { ActorUserId = actor, Action = "supervisor.import", TargetType = "project", TargetId = projectId, Detail = $"tasks={tasks.Count};runs={seenRuns.Count}" });
         await db.SaveChangesAsync();
         await transaction.CommitAsync();
         return Results.Ok(new { agentRuns = seenRuns.Count, evidence = seenEvidence.Count, reviews = seenReviews.Count, gates = seenGates.Count });

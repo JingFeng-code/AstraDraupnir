@@ -26,6 +26,7 @@ public static class SpoolEndpoints
     private static async Task<IResult> Import(Guid projectId, HttpRequest request, ClaimsPrincipal principal, DraupnirDb db)
     {
         if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
+        if (!Access.IsAdmin(user)) return Access.Forbidden();
         if (!await db.Projects.AnyAsync(p => p.Id == projectId)) return Missing();
         if (!await Access.CanProject(db, user, projectId)) return Access.Forbidden();
         using var reader = new StreamReader(request.Body, Encoding.UTF8);
@@ -72,6 +73,7 @@ public static class SpoolEndpoints
                 RecordedAt = DateTimeOffset.UtcNow
             };
             db.Evidence.Add(evidence);
+            await Access.Audit(db, user.Id, "spool.import", "project", projectId, $"command={command};status={status};hash={hash}");
             await db.SaveChangesAsync();
             return Results.Created($"/api/evidence/{evidence.Id}", new { imported = true, evidenceId = evidence.Id, hash });
         }

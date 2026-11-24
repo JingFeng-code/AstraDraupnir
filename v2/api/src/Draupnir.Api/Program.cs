@@ -61,16 +61,31 @@ api.MapPost("/auth/login", async (Login input, DraupnirDb db, IPasswordHasher<Us
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["credentials"] = ["Email and password are required."] });
     var user = await db.Users.SingleOrDefaultAsync(x => x.Email == email);
     if (user is null || !user.IsActive || hasher.VerifyHashedPassword(user, user.PasswordHash, input.Password) == PasswordVerificationResult.Failed)
+    {
+        if (user is not null)
+        {
+            db.AuditLogs.Add(new AuditLog { ActorUserId = user.Id, Action = "auth.login.failed", TargetType = "user", TargetId = user.Id, Detail = $"email={email}" });
+            await db.SaveChangesAsync();
+        }
         return Results.Problem("Invalid credentials.", statusCode: 401);
+    }
     await context.SignInAsync(new ClaimsPrincipal(new ClaimsIdentity([
         new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
         new Claim(ClaimTypes.Name, user.DisplayName),
         new Claim(ClaimTypes.Role, user.Role.ToString())
     ], CookieAuthenticationDefaults.AuthenticationScheme)));
+    db.AuditLogs.Add(new AuditLog { ActorUserId = user.Id, Action = "auth.login", TargetType = "user", TargetId = user.Id, Detail = "local password login" });
+    await db.SaveChangesAsync();
     return Results.Ok(new { user.Id, user.Email, user.DisplayName, user.Role, user.IsActive });
 }).AllowAnonymous();
-api.MapPost("/auth/logout", async (HttpContext context) =>
+api.MapPost("/auth/logout", async (HttpContext context, ClaimsPrincipal principal, DraupnirDb db) =>
 {
+    if (Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+        && await db.Users.FindAsync(userId) is { } user)
+    {
+        db.AuditLogs.Add(new AuditLog { ActorUserId = user.Id, Action = "auth.logout", TargetType = "user", TargetId = user.Id, Detail = $"email={user.Email}" });
+        await db.SaveChangesAsync();
+    }
     await context.SignOutAsync();
     return Results.NoContent();
 });

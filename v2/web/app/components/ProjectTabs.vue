@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import { canImport } from '~/utils/permissions'
+
 const route = useRoute()
+const auth = useAuth()
 const id = computed(() => String(route.params.id))
 const base = computed(() => `/projects/${id.value}`)
 
@@ -13,7 +16,7 @@ const tabs = computed(() => [
   { label: 'Human Gate', to: `${base.value}/gates` },
   { label: '交付報告', to: `${base.value}/reports` },
   { label: '匯入 Supervisor', to: `${base.value}/import` },
-])
+].filter(tab => tab.label !== '匯入 Supervisor' || canImport(auth.state.value.user)))
 
 function isActive(to: string, exact = false): boolean {
   return exact ? route.path === to : route.path === to || route.path.startsWith(`${to}/`)

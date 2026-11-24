@@ -7,8 +7,12 @@ import { parseSpoolEvidence } from '~/utils/spoolEvidence'
 import { isTestData } from '~/lib/engineering'
 import type { Tone } from '~/lib/engineering'
 
+import { canImport } from '~/utils/permissions'
+
 const route = useRoute()
 const api = useApi()
+const auth = useAuth()
+const admin = computed(() => canImport(auth.state.value.user))
 const ws = useWorkspace()
 const id = computed(() => String(route.params.id))
 const evidence = ref<Evidence[]>([])
@@ -88,7 +92,7 @@ watch(id, load, { immediate: true })
     <AppLoading v-if="loading" />
     <div v-else-if="error" class="ui-callout is-fault" style="margin-top: 20px"><p>{{ error.detail }}</p><button type="button" class="ui-btn is-quiet" @click="load">重新載入</button></div>
     <template v-else>
-      <section class="ui-panel" style="margin-top: 24px" aria-labelledby="spool-h">
+      <section v-if="admin" class="ui-panel" style="margin-top: 24px" aria-labelledby="spool-h">
         <div class="ui-panel-h"><div><h2 id="spool-h" class="ui-h2">記錄 Trace 證據</h2><p class="ui-meta">貼上或上傳 Spool <code>spool-result/v1</code> JSON；會存成 Trace 證據，重複內容不會重複寫入。</p></div></div>
         <div class="ui-panel-b ui-stack">
           <label class="ui-stack" style="gap: 6px"><span class="ui-meta">JSON 檔案</span><input type="file" accept="application/json,.json" class="ui-input" @change="onSpoolFile"></label>
@@ -128,3 +132,8 @@ watch(id, load, { immediate: true })
     </template>
   </div>
 </template>
+
+<style scoped>
+.ui-panel-b label, .ui-panel-b .ui-stack { min-width: 0; }
+textarea.ui-field, input.ui-input, select.ui-input { min-width: 0; }
+</style>

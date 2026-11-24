@@ -24,6 +24,7 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal("admin@example.test", (await Json(await client.GetAsync("/api/auth/me"))).GetProperty("email").GetString());
         Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/api/auth/logout", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/me")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/projects")).StatusCode);
         var openApi = await Json(await client.GetAsync("/openapi/v1.json"));
         Assert.True(openApi.GetProperty("paths").TryGetProperty("/api/import/supervisor", out _));
     }
@@ -153,6 +154,8 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
 
         var evidence = await Json(await client.GetAsync($"/api/evidence?projectId={project}"));
         Assert.Contains(evidence.EnumerateArray(), item => item.GetProperty("id").GetGuid() == id);
+        var audit = await Json(await client.GetAsync("/api/audit"));
+        Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "spool.import");
         var invalid = await client.PostAsync(route,
             new StringContent("{\"schema\":\"spool-result/v1\"}", Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
@@ -195,18 +198,71 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         await Json(await admin.PostAsJsonAsync($"/api/gates/{gate.GetProperty("id")}/decision", new { approved = true }));
 
         var audit = await Json(await admin.GetAsync("/api/audit"));
+        Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "auth.login");
         Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "membership.add");
         Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "user.create");
         Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "gate.decision");
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/users/{memberId}", new { role = "Admin" })).StatusCode);
+        Assert.Equal("Admin", (await Json(await member.GetAsync("/api/auth/me"))).GetProperty("role").GetString());
+        Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/users/{memberId}", new { role = "Member" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await admin.DeleteAsync($"/api/projects/{allowed}/members/{memberId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await member.GetAsync($"/api/projects/{allowed}")).StatusCode);
+        var afterRemove = await Json(await member.GetAsync("/api/projects"));
+        Assert.DoesNotContain(afterRemove.EnumerateArray(), item => item.GetProperty("id").GetGuid() == allowed);
 
         Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/users/{memberId}", new { password = newPassword })).StatusCode);
         using var oldLogin = NewClient();
         Assert.Equal(HttpStatusCode.Unauthorized, (await oldLogin.PostAsJsonAsync("/api/auth/login", new { email, password = initialPassword })).StatusCode);
         using var newLogin = NewClient();
         await LoginAs(newLogin, email, newPassword);
+        Assert.Equal(HttpStatusCode.Forbidden, (await newLogin.GetAsync($"/api/projects/{allowed}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/projects/{allowed}/members", new { userId = memberId })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await newLogin.GetAsync($"/api/projects/{allowed}")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/users/{memberId}", new { isActive = false })).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await newLogin.GetAsync($"/api/projects/{allowed}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task AuditRecordsAuthAndCrudWithoutSecrets()
+    {
+        using var client = NewClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/auth/login",
+            new { email = "admin@example.test", password = "wrong-password" })).StatusCode);
+        await Login(client);
+        var project = await NewProject(client, "AUDIT");
+        var requirement = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/requirements",
+            new { code = "REQ-1", title = "Audited requirement", priority = "P2" }));
+        var work = await NewWork(client, project, "AUDIT-1", "Audited work");
+        var other = await NewWork(client, project, "AUDIT-2", "Dependency");
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/projects/{project}/requirements/{requirement.GetProperty("id")}",
+            new { code = "REQ-1", title = "Edited requirement", priority = "P2" })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/projects/{project}/work-items/{work}",
+            new { code = "AUDIT-1", title = "Edited work", status = "Ready", priority = "P2" })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/projects/{project}",
+            new { key = "AUDIT", name = "Edited project", status = "Active" })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await PatchStatus(client, work, "InProgress")).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await AddDependency(client, work, other)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/work-items/{work}/dependencies/{other}")).StatusCode);
+        var gate = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates", new { title = "Audited gate" }));
+        await Json(await client.PostAsJsonAsync($"/api/gates/{gate.GetProperty("id")}/decision", new { approved = true }));
+        await Json(await client.PostAsJsonAsync($"/api/projects/{project}/reports", new { title = "Audited report" }));
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/projects/{project}")).StatusCode);
+
+        var audit = await Json(await client.GetAsync("/api/audit"));
+        var actions = audit.EnumerateArray().Select(row => row.GetProperty("action").GetString()).ToHashSet();
+        foreach (var action in new[] { "auth.login", "auth.login.failed", "project.create", "requirement.create",
+                     "work_item.create", "work_item.update", "work_item.status", "requirement.update",
+                     "dependency.add", "dependency.remove", "gate.create", "gate.decision", "report.generate",
+                     "project.update", "project.archive" })
+            Assert.Contains(action, actions);
+        foreach (var row in audit.EnumerateArray())
+            Assert.DoesNotContain("local-fixture-password", row.GetProperty("detail").GetString() ?? "");
+
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/api/auth/logout", null)).StatusCode);
+        await Login(client);
+        var afterLogout = await Json(await client.GetAsync("/api/audit"));
+        Assert.Contains(afterLogout.EnumerateArray(), row => row.GetProperty("action").GetString() == "auth.logout");
     }
 
     [Fact]
@@ -266,6 +322,8 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
             Assert.Equal(evidence, await ListCount(client, $"/api/evidence?projectId={project}"));
             Assert.Equal(gates, await ListCount(client, $"/api/projects/{project}/gates"));
             Assert.Equal(reviews, await ListCount(client, $"/api/reviews?projectId={project}"));
+            var audit = await Json(await client.GetAsync("/api/audit"));
+            Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "supervisor.import");
         }
     }
 
@@ -329,6 +387,8 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
             Assert.NotNull(document.GetEntry("word/document.xml"));
         }
         Assert.Equal(1, await ListCount(client, $"/api/projects/{project}/reports"));
+        var audit = await Json(await client.GetAsync("/api/audit"));
+        Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "report.generate");
     }
 
     private HttpClient NewClient() => postgres.Factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
