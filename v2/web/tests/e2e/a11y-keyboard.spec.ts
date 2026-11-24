@@ -2,7 +2,12 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 
 const email = process.env.E2E_ADMIN_EMAIL ?? 'admin@draupnir.local'
-const password = process.env.E2E_ADMIN_PASSWORD ?? 'Draupnir!2026'
+function requiredAdminPassword(): string {
+  const value = process.env.E2E_ADMIN_PASSWORD
+  if (!value) throw new Error('E2E_ADMIN_PASSWORD 未設定：請填入被測 API 的管理員密碼。')
+  return value
+}
+const password = requiredAdminPassword()
 const base = process.env.E2E_BASE_URL ?? ''
 
 async function go(page: Page, path: string) {

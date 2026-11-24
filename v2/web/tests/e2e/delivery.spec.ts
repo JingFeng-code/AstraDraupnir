@@ -6,7 +6,13 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
 const email = process.env.E2E_ADMIN_EMAIL ?? 'admin@draupnir.local'
-const password = process.env.E2E_ADMIN_PASSWORD ?? 'Draupnir!2026'
+// 不在 repo 裡放任何密碼：由執行者用環境變數提供（見 v2/README.md）。
+function requiredAdminPassword(): string {
+  const value = process.env.E2E_ADMIN_PASSWORD
+  if (!value) throw new Error('E2E_ADMIN_PASSWORD 未設定：請填入被測 API 的管理員密碼。')
+  return value
+}
+const password = requiredAdminPassword()
 const screenshotDir = process.env.E2E_SCREENSHOT_DIR
   ?? 'E:/Astra/.astra-runs/AUTONOMOUS-DELIVERY/acceptance/screens/draupnir'
 const queue = JSON.parse(

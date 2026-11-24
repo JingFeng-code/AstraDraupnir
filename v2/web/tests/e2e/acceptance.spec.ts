@@ -10,7 +10,12 @@
 import { expect, request as requestFactory, test } from '@playwright/test'
 
 const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@draupnir.local'
-const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'Draupnir!2026'
+function requiredAdminPassword(): string {
+  const value = process.env.E2E_ADMIN_PASSWORD
+  if (!value) throw new Error('E2E_ADMIN_PASSWORD 未設定：請填入被測 API 的管理員密碼。')
+  return value
+}
+const ADMIN_PASSWORD = requiredAdminPassword()
 const unique = () => Array.from({ length: 6 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('')
 
 async function adminApi(baseURL: string | undefined) {

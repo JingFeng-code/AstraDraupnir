@@ -94,13 +94,13 @@ npm run build        # production build (.output)
 
 - PostgreSQL running on `127.0.0.1:55432` (see “Start PostgreSQL and migrate”).
 - The API running at `http://127.0.0.1:5080` with an administrator configured and a migrated database (use a dedicated database such as `draupnir_e2e`; the E2E run creates projects, a Bug with severity, a second Member, and imports Supervisor data).
-- Optional env: `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` (defaults `admin@draupnir.local` / `Draupnir!2026`), `NUXT_API_BASE`, `E2E_PORT`.
+- Required env for the tests: `E2E_ADMIN_PASSWORD` (the administrator password configured for the API under test; nothing is hard-coded in the repo). Optional: `E2E_ADMIN_EMAIL` (default `admin@draupnir.local`), `NUXT_API_BASE`, `E2E_PORT`.
 
 ~~~powershell
 # Example API process for E2E (separate database)
 $env:ConnectionStrings__Draupnir = 'Host=127.0.0.1;Port=55432;Database=draupnir_e2e;Username=postgres'
 $env:DRAUPNIR_ADMIN_EMAIL = 'admin@draupnir.local'
-$env:DRAUPNIR_ADMIN_PASSWORD = 'Draupnir!2026'
+$env:DRAUPNIR_ADMIN_PASSWORD = '<choose a password for this local instance>'
 dotnet run --project src/Draupnir.Api --no-build --no-restore -- --urls http://127.0.0.1:5080
 
 cd ../web

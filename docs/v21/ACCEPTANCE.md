@@ -29,7 +29,7 @@ $env:NUXT_TELEMETRY_DISABLED='1'; $env:NUXT_API_BASE='http://127.0.0.1:5082'
 npm ci; npm run dev -- --host 127.0.0.1 --port 3201
 ```
 
-登入帳號由 `DRAUPNIR_ADMIN_EMAIL` / `DRAUPNIR_ADMIN_PASSWORD` 決定（第一次啟動時建立，密碼用 ASP.NET Identity 雜湊）。目前預覽機使用 `admin@draupnir.local` / `Draupnir!2026`（**只供本機，不是正式密碼**）。
+登入帳號由 `DRAUPNIR_ADMIN_EMAIL` / `DRAUPNIR_ADMIN_PASSWORD` 決定（第一次啟動時建立，密碼用 ASP.NET Identity 雜湊）。本機預覽機的帳號是 `admin@draupnir.local`，密碼由 `DRAUPNIR_ADMIN_PASSWORD` 設定（交付時已輪替；repo 與 PR 不含任何密碼）。E2E 也需要 `E2E_ADMIN_PASSWORD`。
 
 ## 2. 角色與權限
 
