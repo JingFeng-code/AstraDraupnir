@@ -11,6 +11,7 @@ import type {
   SprintStatus,
   Verdict,
   WorkStatus,
+  WorkItemSeverity,
   WorkType,
 } from '~/types/api'
 
@@ -33,6 +34,15 @@ export const workStatusLabels: Record<WorkStatus, Labeled> = {
   InReview: { label: '審查中', className: 'bg-[#ece6f5] text-[#5b3f8c]' },
   Blocked: { label: '阻塞', className: 'bg-[#fbe4e4] text-[#8a1c1c]' },
   Done: { label: '完成', className: 'bg-[#e6f0e7] text-[#2f6b3a]' },
+}
+
+export const severityOptions: WorkItemSeverity[] = ['S1', 'S2', 'S3', 'S4']
+
+export const severityLabels: Record<WorkItemSeverity, Labeled> = {
+  S1: { label: 'S1 嚴重', className: 'bg-[#fbe4e4] text-[#8a1c1c]' },
+  S2: { label: 'S2 高', className: 'bg-[#f7ecd9] text-[#8a5300]' },
+  S3: { label: 'S3 中', className: 'bg-[#e5eaf3] text-[#1f3a68]' },
+  S4: { label: 'S4 低', className: 'bg-[#ece8e1] text-[#5f6879]' },
 }
 
 export const workTypeLabels: Record<WorkType, string> = {

@@ -4,6 +4,7 @@ export type Priority = 'P0' | 'P1' | 'P2' | 'P3'
 export type RequirementStatus = 'Draft' | 'Approved' | 'Implemented' | 'Verified'
 export type RequirementSource = 'UserAuthorized' | 'Repository' | 'ClaudeDecision' | 'External'
 export type WorkType = 'Task' | 'Bug' | 'Feature'
+export type WorkItemSeverity = 'S1' | 'S2' | 'S3' | 'S4'
 export type WorkStatus = 'Backlog' | 'Ready' | 'InProgress' | 'InReview' | 'Blocked' | 'Done'
 export type AssigneeKind = 'None' | 'Human' | 'Agent'
 export type SprintStatus = 'Planned' | 'Active' | 'Closed'
@@ -58,7 +59,7 @@ export interface WorkItem {
   estimate: number | null
   startDate: string | null
   dueDate: string | null
-  severity: string | null
+  severity: WorkItemSeverity | null
   blockedReason: string | null
 }
 

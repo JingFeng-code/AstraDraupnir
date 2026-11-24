@@ -5,6 +5,7 @@ import {
   dragDataType,
   parseWorkStatus,
   priorityLabels,
+  severityLabels,
   workStatusLabels,
   workTypeLabels,
 } from '~/utils/labels'
@@ -81,6 +82,9 @@ function onSelect(event: Event, item: WorkItem) {
             <span>{{ workTypeLabels[item.type] }}</span>
             <span aria-hidden="true">·</span>
             <span>{{ priorityLabels[item.priority] }}</span>
+          </p>
+          <p v-if="item.type === 'Bug' && item.severity" class="mt-1 text-[11px]" :data-testid="`board-severity-${item.code}`">
+            {{ severityLabels[item.severity].label }}
           </p>
           <label class="mt-2 block">
             <span class="text-[11px] font-medium text-ink-subtle">變更狀態</span>

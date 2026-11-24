@@ -92,6 +92,15 @@ test.describe('Draupnir V2 交付流程（真實 API + PostgreSQL）', () => {
     await page.getByTestId('work-item-submit').click()
     await expect(page.getByTestId(`work-item-row-${key}-2`)).toBeVisible()
 
+    // 4b. 建立一個 Bug 並指定嚴重度，確認表單映射與列表顯示
+    await page.getByTestId('new-work-item').click()
+    await page.getByTestId('work-item-type').selectOption('Bug')
+    await page.getByTestId('work-item-severity').selectOption('S2')
+    await page.getByTestId('work-item-title').fill('E2E 嚴重缺陷')
+    await page.getByTestId('work-item-submit').click()
+    await expect(page.getByTestId(`work-item-row-${key}-3`)).toBeVisible()
+    await expect(page.getByTestId(`work-item-severity-${key}-3`)).toContainText('S2')
+
     // 5. 加入相依：第二個工作相依於第一個
     const secondRow = page.getByTestId(`work-item-row-${key}-2`)
     await secondRow.getByTestId(`dependency-select-${key}-2`).selectOption({ label: `${key}-1` })

@@ -12,8 +12,9 @@ import type {
   WorkType,
 } from '~/types/api'
 import { toApiError, type ApiError } from '~/utils/errors'
-import { assigneeKindLabels, parseWorkStatus, priorityLabels, workStatusLabels, workTypeLabels } from '~/utils/labels'
+import { assigneeKindLabels, parseWorkStatus, priorityLabels, severityLabels, severityOptions, workStatusLabels, workTypeLabels } from '~/utils/labels'
 import { todayIso } from '~/utils/format'
+import { severityPayload } from '~/utils/workItemForm'
 
 const route = useRoute()
 const api = useApi()
@@ -43,6 +44,7 @@ const formError = ref<ApiError | null>(null)
 const form = reactive({
   code: '',
   type: 'Task' as WorkType,
+  severity: '',
   title: '',
   description: '',
   status: 'Ready' as WorkStatus,
@@ -143,6 +145,7 @@ async function createItem() {
     await api.post<WorkItem>(`/api/projects/${id.value}/work-items`, {
       code: form.code.trim(),
       type: form.type,
+      severity: severityPayload(form.type, form.severity),
       title: form.title.trim(),
       description: form.description.trim(),
       status: form.status,
@@ -157,6 +160,7 @@ async function createItem() {
     })
     form.title = ''
     form.description = ''
+    form.severity = ''
     form.assignee = ''
     form.startDate = ''
     form.dueDate = ''
@@ -294,8 +298,15 @@ watch(id, load, { immediate: true })
         </div>
         <div>
           <label for="wi-type" class="field-label">類型</label>
-          <select id="wi-type" v-model="form.type" class="field-input">
+          <select id="wi-type" v-model="form.type" class="field-input" data-testid="work-item-type">
             <option v-for="type in types" :key="type" :value="type">{{ workTypeLabels[type] }}</option>
+          </select>
+        </div>
+        <div v-if="form.type === 'Bug'">
+          <label for="wi-severity" class="field-label">Bug 嚴重度</label>
+          <select id="wi-severity" v-model="form.severity" class="field-input" data-testid="work-item-severity">
+            <option value="">未指定</option>
+            <option v-for="severity in severityOptions" :key="severity" :value="severity">{{ severityLabels[severity].label }}</option>
           </select>
         </div>
         <div class="sm:col-span-2">
@@ -478,6 +489,7 @@ watch(id, load, { immediate: true })
               </td>
               <td class="px-3 py-3 text-xs text-ink-muted">
                 <p>{{ workTypeLabels[item.type] }} · {{ priorityLabels[item.priority] }}</p>
+                <p v-if="item.type === 'Bug' && item.severity" class="mt-0.5" :data-testid="`work-item-severity-${item.code}`">{{ severityLabels[item.severity].label }}</p>
                 <p v-if="item.assignee" class="mt-0.5">{{ assigneeKindLabels[item.assigneeKind] }}：{{ item.assignee }}</p>
               </td>
             </tr>
