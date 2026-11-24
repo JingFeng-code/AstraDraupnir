@@ -14,10 +14,11 @@ import type {
 import { toApiError, type ApiError } from '~/utils/errors'
 import { assigneeKindLabels, parseWorkStatus, priorityLabels, severityLabels, severityOptions, workStatusLabels, workTypeLabels } from '~/utils/labels'
 import { todayIso } from '~/utils/format'
-import { severityPayload } from '~/utils/workItemForm'
+import { severityPayload, severityRank, workTone, severityTone } from '~/utils/workItemForm'
 
 const route = useRoute()
 const api = useApi()
+const { toast } = useWorkspace()
 const project = inject<Ref<import('~/types/api').Project | null> | null>('project', null)
 const id = computed(() => String(route.params.id))
 const projectKey = computed(() => project?.value?.key ?? '')
@@ -36,8 +37,18 @@ const actionDetails = ref<string[]>([])
 const view = ref<'table' | 'board'>('table')
 const busyId = ref<string | null>(null)
 
-const filters = reactive({ status: '', type: '', q: '' })
+const filters = reactive({ status: '', type: '', severity: '', assignee: '', q: '' })
+const order = ref('code')
+const requirementFilter = computed(() => typeof route.query.requirement === 'string' ? route.query.requirement : '')
+const assignees = computed(() => [...new Set(items.value.flatMap(item => item.assignee ? [item.assignee] : []))].sort())
+function clearFilters() {
+  Object.assign(filters, { status: '', type: '', severity: '', assignee: '', q: '' })
+  if (requirementFilter.value) void navigateTo({ path: route.path, query: { ...route.query, requirement: undefined } })
+}
 
+const editing = ref<WorkItem | null>(null)
+const removeOpen = ref(false)
+const dependencyTarget = ref<{ item: WorkItem, id: string } | null>(null)
 const submitting = ref(false)
 const formOpen = ref(false)
 const formError = ref<ApiError | null>(null)
@@ -56,6 +67,7 @@ const form = reactive({
   milestoneId: '',
   startDate: '',
   dueDate: '',
+  blockedReason: '',
 })
 
 const blockedOpen = ref(false)
@@ -71,9 +83,26 @@ const assigneeKinds: AssigneeKind[] = ['None', 'Human', 'Agent']
 const filteredItems = computed(() => items.value.filter((item) => {
   if (filters.status && item.status !== filters.status) return false
   if (filters.type && item.type !== filters.type) return false
-  if (filters.q && !`${item.code} ${item.title} ${item.description}`.toLowerCase().includes(filters.q.toLowerCase())) return false
-  return true
-}))
+  if (filters.severity && item.severity !== filters.severity) return false
+  if (filters.assignee === 'unassigned' ? !!item.assignee : filters.assignee && 'user:' + item.assignee !== filters.assignee) return false
+  if (requirementFilter.value && item.requirementId !== requirementFilter.value) return false
+  return `${item.code} ${item.title} ${item.description}`.toLowerCase().includes(filters.q.trim().toLowerCase())
+}).sort((a, b) => (order.value === 'severity' ? severityRank(a.severity) - severityRank(b.severity) : 0)
+  || a.code.localeCompare(b.code, 'zh-Hant', { numeric: true })))
+
+function openForm(item?: WorkItem) {
+  editing.value = item ?? null
+  formError.value = null
+  Object.assign(form, {
+    code: item?.code ?? nextCode(), type: item?.type ?? 'Task', severity: item?.severity ?? '',
+    title: item?.title ?? '', description: item?.description ?? '', status: item?.status ?? 'Ready',
+    priority: item?.priority ?? 'P2', assigneeKind: item?.assigneeKind ?? 'None',
+    assignee: item?.assignee ?? '', requirementId: item?.requirementId ?? requirementFilter.value,
+    sprintId: item?.sprintId ?? '', milestoneId: item?.milestoneId ?? '',
+    startDate: item?.startDate ?? '', dueDate: item?.dueDate ?? '', blockedReason: item?.blockedReason ?? '',
+  })
+  formOpen.value = true
+}
 
 function nextCode(): string {
   const key = projectKey.value || 'ITEM'
@@ -100,14 +129,10 @@ function clearActionError() {
 
 async function loadDependencies(list: WorkItem[]) {
   const entries = await Promise.all(list.map(async (item) => {
-    try {
-      const deps = await api.get<WorkItemDependency[]>(`/api/work-items/${item.id}/dependencies`)
-      return [item.id, deps.map(dep => dep.dependsOnId)] as const
-    } catch {
-      return [item.id, []] as const
-    }
+    const deps = await api.get<WorkItemDependency[]>(`/api/work-items/${item.id}/dependencies`)
+    return [item.id, deps.map(dep => dep.dependsOnId)] as const
   }))
-  dependencies.value = Object.fromEntries(entries)
+  dependencies.value = { ...dependencies.value, ...Object.fromEntries(entries) }
 }
 
 async function load() {
@@ -120,12 +145,16 @@ async function load() {
       api.get<Sprint[]>(`/api/projects/${id.value}/sprints`),
       api.get<Milestone[]>(`/api/projects/${id.value}/milestones`),
     ])
-    items.value = page.items
+    const all = [...page.items]
+    for (let next = 2; next <= Math.ceil(page.total / page.pageSize); next++) {
+      all.push(...(await api.get<Paged<WorkItem>>(`/api/projects/${id.value}/work-items`, { page: next, pageSize: 100 })).items)
+    }
+    items.value = all
     requirements.value = reqs
     sprints.value = sprintList
     milestones.value = milestoneList
     if (!form.code) form.code = nextCode()
-    await loadDependencies(page.items)
+    await loadDependencies(all)
   } catch (caught) {
     loadError.value = toApiError(caught)
   } finally {
@@ -142,7 +171,9 @@ async function createItem() {
   formError.value = null
   submitting.value = true
   try {
-    await api.post<WorkItem>(`/api/projects/${id.value}/work-items`, {
+    const url = `/api/projects/${id.value}/work-items`
+    const payload = {
+      ...editing.value,
       code: form.code.trim(),
       type: form.type,
       severity: severityPayload(form.type, form.severity),
@@ -157,13 +188,11 @@ async function createItem() {
       milestoneId: optional(form.milestoneId),
       startDate: optional(form.startDate),
       dueDate: optional(form.dueDate),
-    })
-    form.title = ''
-    form.description = ''
-    form.severity = ''
-    form.assignee = ''
-    form.startDate = ''
-    form.dueDate = ''
+      blockedReason: form.status === 'Blocked' ? optional(form.blockedReason.trim()) : null,
+    }
+    if (editing.value) await api.put<WorkItem>(url + '/' + editing.value.id, payload)
+    else await api.post<WorkItem>(url, payload)
+    toast.value = editing.value ? '已更新工作項目' : '已建立工作項目'
     formOpen.value = false
     await load()
     form.code = nextCode()
@@ -184,6 +213,7 @@ async function patchStatus(item: WorkItem, status: WorkStatus, reason?: string) 
     })
     const index = items.value.findIndex(candidate => candidate.id === item.id)
     if (index >= 0) items.value[index] = updated
+    toast.value = '已更新 ' + item.code
   } catch (caught) {
     setActionError(caught)
   } finally {
@@ -216,8 +246,9 @@ async function confirmBlocked() {
 
 async function updateSeverity(item: WorkItem, event: Event) {
   const select = event.target as HTMLSelectElement
-  const severity = select.value || null
-  if (item.type !== 'Bug') return
+  const severity = severityPayload(item.type, select.value)
+  select.value = item.severity ?? ''
+  if (item.type !== 'Bug' || severity === item.severity) return
   busyId.value = item.id
   clearActionError()
   try {
@@ -227,6 +258,7 @@ async function updateSeverity(item: WorkItem, event: Event) {
     })
     const index = items.value.findIndex(candidate => candidate.id === item.id)
     if (index >= 0) items.value[index] = updated
+    toast.value = '已更新 ' + item.code
   } catch (caught) {
     setActionError(caught)
   } finally {
@@ -250,7 +282,8 @@ async function addDependency(item: WorkItem, event: Event) {
   try {
     await api.post(`/api/work-items/${item.id}/dependencies`, { dependsOnId })
     select.value = ''
-    await loadDependencies(items.value)
+    await loadDependencies([item])
+    toast.value = '已更新相依項目'
   } catch (caught) {
     setActionError(caught)
   } finally {
@@ -258,13 +291,18 @@ async function addDependency(item: WorkItem, event: Event) {
   }
 }
 
-async function removeDependency(item: WorkItem, depId: string) {
+async function removeDependency() {
+  if (!dependencyTarget.value) return
+  const { item, id: depId } = dependencyTarget.value
   clearActionError()
   busyId.value = item.id
   try {
     await api.del(`/api/work-items/${item.id}/dependencies/${depId}`)
-    await loadDependencies(items.value)
+    removeOpen.value = false
+    await loadDependencies([item])
+    toast.value = '已更新相依項目'
   } catch (caught) {
+    removeOpen.value = false
     setActionError(caught)
   } finally {
     busyId.value = null
@@ -275,18 +313,18 @@ watch(id, load, { immediate: true })
 </script>
 
 <template>
-  <div class="site-container py-6">
+  <div class="min-w-0 space-y-5">
     <div class="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h2 class="text-xl font-bold text-ink">工作項目</h2>
-        <p class="text-sm text-ink-muted">表格或看板操作；Done 需要所有相依項目先完成，Blocked 需要原因。</p>
+        <h2 class="ui-h2">工作項目</h2>
+        <p class="text-sm text-ink-muted">完成前須先完成所有相依項目。設為阻塞時須填寫原因。</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <div class="inline-flex rounded-lg border border-line bg-surface p-0.5" role="group" aria-label="檢視模式">
+        <div class="flex flex-wrap gap-2" role="group" aria-label="檢視模式">
           <button
             type="button"
-            class="rounded-md px-3 py-1.5 text-sm font-medium"
-            :class="view === 'table' ? 'bg-navy-800 text-white' : 'text-ink-muted'"
+            class="btn"
+            :class="view === 'table' ? 'btn-secondary ring-2 ring-navy-700' : 'btn-secondary'"
             :aria-pressed="view === 'table'"
             data-testid="view-table"
             @click="view = 'table'"
@@ -295,8 +333,8 @@ watch(id, load, { immediate: true })
           </button>
           <button
             type="button"
-            class="rounded-md px-3 py-1.5 text-sm font-medium"
-            :class="view === 'board' ? 'bg-navy-800 text-white' : 'text-ink-muted'"
+            class="btn"
+            :class="view === 'board' ? 'btn-secondary ring-2 ring-navy-700' : 'btn-secondary'"
             :aria-pressed="view === 'board'"
             data-testid="view-board"
             @click="view = 'board'"
@@ -304,13 +342,14 @@ watch(id, load, { immediate: true })
             看板
           </button>
         </div>
-        <button type="button" class="btn btn-primary" data-testid="new-work-item" @click="formOpen = !formOpen">
-          {{ formOpen ? '收起表單' : '新增工作項目' }}
+        <button type="button" class="btn btn-primary" data-testid="new-work-item" @click="openForm()">
+          新增工作項目
         </button>
       </div>
     </div>
 
-    <form v-if="formOpen" class="panel mt-4 space-y-4 p-5" data-testid="work-item-form" @submit.prevent="createItem">
+    <ProjectFormDialog v-model:open="formOpen" :title="editing ? '編輯工作項目' : '新增工作項目'" :busy="submitting">
+    <form class="space-y-4" data-testid="work-item-form" @submit.prevent="createItem">
       <div class="grid gap-4 sm:grid-cols-4">
         <div>
           <label for="wi-code" class="field-label">代碼</label>
@@ -323,7 +362,7 @@ watch(id, load, { immediate: true })
           </select>
         </div>
         <div v-if="form.type === 'Bug'">
-          <label for="wi-severity" class="field-label">Bug 嚴重度</label>
+          <label for="wi-severity" class="field-label">缺陷嚴重度</label>
           <select id="wi-severity" v-model="form.severity" class="field-input" data-testid="work-item-severity">
             <option value="">未指定</option>
             <option v-for="severity in severityOptions" :key="severity" :value="severity">{{ severityLabels[severity].label }}</option>
@@ -393,33 +432,43 @@ watch(id, load, { immediate: true })
           <input id="wi-due" v-model="form.dueDate" type="date" class="field-input">
         </div>
       </div>
+      <label v-if="form.status === 'Blocked'" class="block"><span class="field-label">阻塞原因</span><textarea v-model="form.blockedReason" required class="field-input" /></label>
       <AppNotice v-if="formError" :message="formError.detail" :details="Object.values(formError.fields).flat()" />
       <div class="flex justify-end gap-2">
         <button type="button" class="btn btn-secondary" @click="formOpen = false">取消</button>
         <button type="submit" class="btn btn-primary" :disabled="submitting" data-testid="work-item-submit">
-          {{ submitting ? '建立中…' : '建立工作項目' }}
+          {{ submitting ? '儲存中…' : editing ? '儲存工作項目' : '建立工作項目' }}
         </button>
       </div>
     </form>
+    </ProjectFormDialog>
 
-    <div class="mt-4 flex flex-wrap items-end gap-3">
+    <div class="ui-panel grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
       <div>
         <label for="filter-status" class="field-label">狀態篩選</label>
-        <select id="filter-status" v-model="filters.status" class="field-input w-40">
+        <select id="filter-status" v-model="filters.status" class="field-input">
           <option value="">全部</option>
           <option v-for="status in statuses" :key="status" :value="status">{{ workStatusLabels[status].label }}</option>
         </select>
       </div>
       <div>
         <label for="filter-type" class="field-label">類型篩選</label>
-        <select id="filter-type" v-model="filters.type" class="field-input w-36">
+        <select id="filter-type" v-model="filters.type" class="field-input">
           <option value="">全部</option>
           <option v-for="type in types" :key="type" :value="type">{{ workTypeLabels[type] }}</option>
         </select>
       </div>
-      <div class="min-w-[12rem] flex-1">
+      <div class="min-w-0">
         <label for="filter-q" class="field-label">搜尋</label>
         <input id="filter-q" v-model="filters.q" type="search" class="field-input" placeholder="代碼、標題或說明">
+      </div>
+      <label><span class="field-label">嚴重度篩選</span><select v-model="filters.severity" class="field-input"><option value="">全部嚴重度</option><option v-for="severity in severityOptions" :key="severity" :value="severity">{{ severityLabels[severity].label }}</option></select></label>
+      <label><span class="field-label">指派對象篩選</span><select v-model="filters.assignee" class="field-input"><option value="">所有對象</option><option value="unassigned">未指派</option><option v-for="assignee in assignees" :key="assignee" :value="'user:' + assignee">{{ assignee }}</option></select></label>
+      <label><span class="field-label">排序</span><select v-model="order" class="field-input"><option value="code">工作項目代碼</option><option value="severity">嚴重度（最高優先）</option></select></label>
+      <div class="flex flex-wrap items-center gap-3 sm:col-span-2 xl:col-span-3">
+        <button type="button" class="btn btn-secondary" :aria-pressed="filters.type === 'Bug'" :class="{ 'ring-2 ring-navy-700': filters.type === 'Bug' }" @click="filters.type = filters.type === 'Bug' ? '' : 'Bug'">缺陷</button>
+        <span v-if="requirementFilter" class="ui-meta">需求：{{ requirements.find(req => req.id === requirementFilter)?.code ?? '指定需求' }}</span>
+        <button type="button" class="btn btn-ghost" @click="clearFilters">清除篩選</button>
       </div>
     </div>
 
@@ -432,43 +481,46 @@ watch(id, load, { immediate: true })
     />
 
     <AppLoading v-if="loading" />
-    <AppNotice v-else-if="loadError" class="mt-4" :message="loadError.detail" />
-    <AppEmpty v-else-if="!items.length" class="mt-4" title="還沒有工作項目" description="新增第一個工作項目，或從 Supervisor 匯入。" />
+    <div v-else-if="loadError" class="space-y-3"><AppNotice :message="loadError.detail" /><button class="btn btn-secondary" @click="load">重試</button></div>
+    <AppEmpty v-else-if="!items.length" class="mt-4" title="還沒有工作項目" description="新增第一個工作項目，或從 Supervisor 匯入。"><button class="btn btn-secondary" @click="openForm()">新增工作項目</button></AppEmpty>
+    <AppEmpty v-else-if="!filteredItems.length" title="找不到符合條件的工作項目"><button class="btn btn-secondary" @click="clearFilters">清除篩選</button></AppEmpty>
 
     <template v-else>
       <div v-if="view === 'board'" class="mt-5">
         <WorkItemBoard :items="filteredItems" :busy-id="busyId" @move="requestMove" />
       </div>
 
-      <div v-else class="table-wrap panel mt-5">
-        <table class="w-full text-left text-sm">
-          <thead class="bg-surface-muted text-xs text-ink-subtle">
+      <div v-else class="ui-panel mt-5 min-w-0">
+        <table class="ui-table work-table" aria-label="工作項目">
+          <thead>
             <tr>
-              <th class="px-3 py-2 font-medium">代碼</th>
-              <th class="px-3 py-2 font-medium">標題</th>
-              <th class="px-3 py-2 font-medium">狀態</th>
-              <th class="px-3 py-2 font-medium">相依</th>
-              <th class="px-3 py-2 font-medium">類型／優先級</th>
+              <th scope="col">代碼</th>
+              <th scope="col">標題</th>
+              <th scope="col">狀態</th>
+              <th scope="col">相依</th>
+              <th scope="col">類型／優先級</th>
             </tr>
           </thead>
           <tbody>
             <tr
               v-for="item in filteredItems"
               :key="item.id"
-              class="border-t border-line align-top"
+              class="align-top"
               :data-testid="`work-item-row-${item.code}`"
             >
-              <td class="px-3 py-3 font-mono text-xs">{{ item.code }}</td>
-              <td class="px-3 py-3">
-                <p class="font-medium text-ink">{{ item.title }}</p>
-                <p v-if="item.description" class="mt-0.5 line-clamp-2 text-xs text-ink-muted">{{ item.description }}</p>
-                <p v-if="item.blockedReason" class="mt-1 text-xs text-[#8a1c1c]">阻塞原因：{{ item.blockedReason }}</p>
+              <td class="px-3 py-3 font-mono text-sm">{{ item.code }}</td>
+              <td class="ui-wide">
+                <NuxtLink :to="'/work/' + item.id" class="font-semibold text-navy-700 hover:underline">{{ item.title }}</NuxtLink> <span v-if="item.title.includes('測試資料')" class="ui-tag is-test text-sm">測試資料</span>
+                <button class="btn btn-ghost" :aria-label="'編輯 ' + item.code" @click="openForm(item)">編輯</button>
+                <p v-if="item.description" class="mt-0.5 line-clamp-2 text-sm text-ink-muted">{{ item.description }}</p>
+                <p v-if="item.blockedReason" class="ui-callout is-fault mt-1 text-sm">阻塞原因：{{ item.blockedReason }}</p>
               </td>
-              <td class="px-3 py-3">
+              <td class="ui-wide">
+                <UiPill :tone="workTone[item.status]" :label="workStatusLabels[item.status].label" />
                 <label class="sr-only" :for="`status-${item.code}`">變更 {{ item.code }} 狀態</label>
                 <select
                   :id="`status-${item.code}`"
-                  class="field-input w-32 py-1 text-xs"
+                  class="field-input mt-2"
                   :value="item.status"
                   :disabled="busyId === item.id"
                   :data-testid="`status-select-${item.code}`"
@@ -477,21 +529,21 @@ watch(id, load, { immediate: true })
                   <option v-for="status in statuses" :key="status" :value="status">{{ workStatusLabels[status].label }}</option>
                 </select>
               </td>
-              <td class="px-3 py-3 text-xs">
+              <td class="ui-wide text-sm">
                 <ul v-if="(dependencies[item.id] ?? []).length" class="space-y-1">
                   <li v-for="depId in dependencies[item.id]" :key="depId" class="flex flex-wrap items-center gap-1">
                     <span class="font-mono">{{ itemCode(depId) }}</span>
-                    <button type="button" class="text-[#8a1c1c] underline" :aria-label="`移除 ${item.code} 對 ${itemCode(depId)} 的相依`" @click="removeDependency(item, depId)">
+                    <button type="button" class="btn btn-danger" :aria-label="`移除 ${item.code} 對 ${itemCode(depId)} 的相依`" @click="dependencyTarget = { item, id: depId }; removeOpen = true">
                       移除
                     </button>
                   </li>
                 </ul>
-                <p v-else class="text-ink-subtle">無</p>
+                <p v-else class="ui-meta">無相依項目</p>
                 <div class="mt-2 flex items-center gap-1">
                   <label class="sr-only" :for="`dep-${item.code}`">選擇 {{ item.code }} 的相依項目</label>
                   <select
                     :id="`dep-${item.code}`"
-                    class="field-input w-28 py-1 text-xs"
+                    class="field-input"
                     :disabled="busyId === item.id"
                     :data-testid="`dependency-select-${item.code}`"
                     @change="addDependency(item, $event)"
@@ -507,12 +559,13 @@ watch(id, load, { immediate: true })
                   </select>
                 </div>
               </td>
-              <td class="px-3 py-3 text-xs text-ink-muted">
+              <td class="ui-wide text-sm text-ink-muted">
                 <p>{{ workTypeLabels[item.type] }} · {{ priorityLabels[item.priority] }}</p>
                 <label v-if="item.type === 'Bug'" class="mt-1 block">
-                  <span class="text-[11px] text-ink-subtle">Bug 嚴重度</span>
+                  <span class="field-label">缺陷嚴重度</span>
+                  <UiPill v-if="item.severity" :tone="severityTone[item.severity]" :label="severityLabels[item.severity].label" />
                   <select
-                    class="field-input mt-0.5 py-1 text-xs"
+                    class="field-input mt-2"
                     :value="item.severity ?? ''"
                     :disabled="busyId === item.id"
                     :data-testid="`severity-select-${item.code}`"
@@ -530,17 +583,26 @@ watch(id, load, { immediate: true })
       </div>
     </template>
 
+    <ConfirmDialog v-model:open="removeOpen" title="移除相依項目" tone="danger" confirm-label="確認移除" :busy="!!busyId" @confirm="removeDependency" />
     <ConfirmDialog
       v-model:open="blockedOpen"
       title="設定為阻塞"
-      description="請填寫阻塞原因；原因會顯示在工作項目與 Dashboard。"
+      description="請填寫阻塞原因；原因會顯示在工作項目與專案總覽。"
       confirm-label="設為阻塞"
       :busy="busyId === blockedTarget?.id"
       @confirm="confirmBlocked"
     >
       <label for="blocked-reason" class="field-label mt-4">原因</label>
       <textarea id="blocked-reason" v-model="blockedReason" rows="3" class="field-input" data-testid="blocked-reason" />
-      <p v-if="blockedError" class="mt-2 text-sm text-[#8a1c1c]" role="alert">{{ blockedError }}</p>
+      <p v-if="blockedError" class="ui-callout is-fault mt-2 text-sm" role="alert">{{ blockedError }}</p>
     </ConfirmDialog>
   </div>
 </template>
+
+<style scoped>
+.work-table tbody tr { cursor: auto; }
+@media (max-width: 760px) {
+  .work-table td { min-width: 0; padding: 2px 0; }
+  .work-table td:nth-child(4) { grid-column: 1 / -1; }
+}
+</style>

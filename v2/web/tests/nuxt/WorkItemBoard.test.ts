@@ -64,4 +64,15 @@ describe('WorkItemBoard', () => {
     await wrapper.get('[data-testid="board-column-Ready"]').trigger('drop', { dataTransfer })
     expect(wrapper.emitted('move')).toHaveLength(1)
   })
+  it('停用正在更新的卡片，保留詳情連結', async () => {
+    const target = item({ id: 'a', code: 'DEMO-1', status: 'Ready' })
+    const wrapper = await mountSuspended(WorkItemBoard, { props: { items: [target], busyId: 'a' } })
+    const card = wrapper.get('[data-testid="board-card-DEMO-1"]')
+    expect(card.attributes('draggable')).toBe('false')
+    expect(card.get('a').attributes('href')).toBe('/work/a')
+    expect(card.get('select').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="board-column-Done"]').trigger('drop', { dataTransfer: { getData: () => 'a' } })
+    expect(wrapper.emitted('move')).toBeUndefined()
+  })
+
 })
