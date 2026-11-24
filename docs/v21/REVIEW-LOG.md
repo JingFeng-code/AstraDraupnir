@@ -40,3 +40,19 @@
 |---|---|---|
 | T77 | Implementer report for R2-02 / R2-04 / Review Desk reason (Pi-2) | all three done; API 42, web 52, e2e 26 |
 | T78 | Independent delta review of `d58c8c7..960f876` | **0 must-fix**; 3 low residuals (docs counts, legacy-decision assertion, explicit-instance freezing) all closed in `960f876` |
+
+## Round 4 — final pinpoint fixes (Supervisor import identities)
+
+| Finding | Fixed | Test that reproduces the original problem |
+|---|---|---|
+| Custom `gate.externalRef` could be shared across sources | the custom ref is namespaced: `supervisor:{instance}:{custom}` | `CustomGateRefIsNamespacedPerSourceInstance` |
+| An import with neither projectId nor sourceInstance picked an arbitrary source | refused with 409 when the task id exists in more than one instance (before any write) | `AmbiguousSourceInstanceIsRefusedWithoutProjectOrInstance` |
+| A legacy gate with a human decision could be re-linked to the wrong source | only **Pending** legacy gates are adopted; a decided gate keeps its ref/status/note and a new pending gate is created | `PendingLegacyGateIsAdoptedButADecidedOneIsLeftAlone` |
+
+| Review | Scope | Verdict |
+|---|---|---|
+| T79 | Delta review of `c81144a..cdf0ee1` | **0 must-fix**; 1 low residual (a crafted custom ref that literally equals another instance's namespaced ref could still claim a *Pending* gate — no human decision can be moved; recorded as a follow-up) |
+
+ChatGPT's final pinpoint review of `c81144a` was **GO for UAT** with V2.1 feature-frozen; A-11, A-14, the dedicated icon set/logo, live sync and Supervisor write-back are deferred to a later version.
+
+**Final regression** on the fixed tree: API 49/49, web 52/52, E2E 26/26 (instance-guarded).
