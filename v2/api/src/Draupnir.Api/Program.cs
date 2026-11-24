@@ -60,13 +60,16 @@ api.MapPost("/auth/login", async (Login input, DraupnirDb db, IPasswordHasher<Us
     if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(input.Password))
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["credentials"] = ["Email and password are required."] });
     var user = await db.Users.SingleOrDefaultAsync(x => x.Email == email);
-    if (user is null || !user.IsActive || hasher.VerifyHashedPassword(user, user.PasswordHash, input.Password) == PasswordVerificationResult.Failed)
+    if (user is null)
     {
-        if (user is not null)
-        {
-            db.AuditLogs.Add(new AuditLog { ActorUserId = user.Id, Action = "auth.login.failed", TargetType = "user", TargetId = user.Id, Detail = $"email={email}" });
-            await db.SaveChangesAsync();
-        }
+        db.AuditLogs.Add(new AuditLog { ActorUserId = null, Action = "auth.login.failed", TargetType = "user", TargetId = null, Detail = $"email={email}" });
+        await db.SaveChangesAsync();
+        return Results.Problem("Invalid credentials.", statusCode: 401);
+    }
+    if (!user.IsActive || hasher.VerifyHashedPassword(user, user.PasswordHash, input.Password) == PasswordVerificationResult.Failed)
+    {
+        db.AuditLogs.Add(new AuditLog { ActorUserId = user.Id, Action = "auth.login.failed", TargetType = "user", TargetId = user.Id, Detail = $"email={email}" });
+        await db.SaveChangesAsync();
         return Results.Problem("Invalid credentials.", statusCode: 401);
     }
     await context.SignInAsync(new ClaimsPrincipal(new ClaimsIdentity([

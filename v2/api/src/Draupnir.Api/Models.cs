@@ -38,7 +38,7 @@ public sealed class ProjectMember
 public sealed class AuditLog
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid ActorUserId { get; set; }
+    public Guid? ActorUserId { get; set; }
     public string Action { get; set; } = "";
     public string TargetType { get; set; } = "";
     public Guid? TargetId { get; set; }

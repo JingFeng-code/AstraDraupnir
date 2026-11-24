@@ -5,7 +5,7 @@ import { canManageUsers } from '~/utils/permissions'
 
 interface AuditEntry {
   id: string
-  actorUserId: string
+  actorUserId: string | null
   action: string
   targetType: string
   targetId: string | null
@@ -33,7 +33,7 @@ const absoluteTime = (iso: string) => new Date(iso).toLocaleString('zh-TW', {
   year: 'numeric', month: '2-digit', day: '2-digit',
   hour: '2-digit', minute: '2-digit', hour12: false,
 })
-const actorLabel = (id: string) => users.value.find(u => u.id === id)?.email ?? id
+const actorLabel = (id: string | null) => id ? (users.value.find(u => u.id === id)?.email ?? id) : '未登入（未知帳號）'
 const actions = computed(() => [...new Set(entries.value.map(e => e.action))].sort())
 
 const filtered = computed(() => {
