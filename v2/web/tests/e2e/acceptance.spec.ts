@@ -57,7 +57,8 @@ test('acceptance: users, roles, members, audit, logout', async ({ baseURL }) => 
   expect(audit.some((row: { action: string }) => row.action === 'membership.add')).toBe(true)
   expect(audit.some((row: { action: string }) => row.action === 'membership.remove')).toBe(true)
 
-  const spool = { schema: 'spool-result/v1', command: 'check', status: 'pass', exitCode: 0, findings: [], counts: {} }
+  // SpoolEndpoints 會把 command 當成 Evidence.Title，所以 command 也要帶測試資料標記。
+  const spool = { schema: 'spool-result/v1', command: '測試資料 check', status: 'pass', exitCode: 0, findings: [], counts: {} }
   expect((await member.post(`/api/projects/${projectId}/spool-results`, { data: spool })).status()).toBe(403)
   expect((await member.post(`/api/import/supervisor?projectId=${projectId}`, { data: { tasks: [] } })).status()).toBe(403)
   expect((await admin.post(`/api/projects/${projectId}/spool-results`, { data: spool })).status()).toBe(201)
