@@ -10,6 +10,8 @@ import {
   workTypeLabels,
 } from '~/utils/labels'
 
+import { severityTone, workTone } from '~/utils/workItemForm'
+
 const props = withDefaults(defineProps<{
   items: WorkItem[]
   busyId?: string | null
@@ -39,7 +41,7 @@ function onDrop(event: DragEvent, status: WorkStatus) {
   const id = event.dataTransfer?.getData(dragDataType) || dragging.value
   dragging.value = null
   const item = props.items.find(candidate => candidate.id === id)
-  if (item && item.status !== status) emit('move', item, status)
+  if (item && item.id !== props.busyId && item.status !== status) emit('move', item, status)
 }
 
 function onSelect(event: Event, item: WorkItem) {
@@ -51,19 +53,19 @@ function onSelect(event: Event, item: WorkItem) {
 </script>
 
 <template>
-  <div class="grid gap-4 overflow-x-auto pb-2 md:grid-cols-3 xl:grid-cols-6" role="list" aria-label="工作項目看板">
+  <div class="work-board min-w-0" role="list" aria-label="工作項目看板">
     <section
       v-for="status in boardColumns"
       :key="status"
-      class="min-w-[15rem] rounded-xl border border-line bg-surface-muted/60 p-3"
+      class="ui-panel min-w-0 p-4" role="listitem"
       :data-testid="`board-column-${status}`"
       :aria-labelledby="`board-title-${status}`"
       @dragover.prevent
       @drop="onDrop($event, status)"
     >
-      <h3 :id="`board-title-${status}`" class="mb-2 flex items-center justify-between gap-2 text-sm font-bold text-ink">
-        <span>{{ workStatusLabels[status].label }}</span>
-        <span class="rounded-md bg-surface px-1.5 py-0.5 font-mono text-xs text-ink-subtle">{{ itemsIn(status).length }}</span>
+      <h3 :id="`board-title-${status}`" class="ui-h3 mb-3 flex flex-wrap items-center justify-between gap-2">
+        <UiPill :tone="workTone[status]" :label="workStatusLabels[status].label" />
+        <span class="rounded-md bg-surface px-1.5 py-0.5 font-mono text-sm text-ink-subtle">{{ itemsIn(status).length }}</span>
       </h3>
 
       <ul v-if="itemsIn(status).length" class="space-y-2">
@@ -71,25 +73,27 @@ function onSelect(event: Event, item: WorkItem) {
           v-for="item in itemsIn(status)"
           :key="item.id"
           :data-testid="`board-card-${item.code}`"
-          class="rounded-lg border border-line bg-surface p-3"
+          class="min-w-0 rounded-lg bg-surface-muted p-3"
           :class="{ 'opacity-60': busyId === item.id }"
-          draggable="true"
+          :draggable="busyId !== item.id"
+          @dragend="dragging = null"
           @dragstart="onDragStart($event, item)"
         >
-          <p class="font-mono text-[11px] text-ink-subtle">{{ item.code }}</p>
-          <p class="mt-0.5 text-sm font-semibold text-ink">{{ item.title }}</p>
-          <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-muted">
+          <p class="font-mono text-sm text-ink-subtle">{{ item.code }}</p>
+          <NuxtLink :to="'/work/' + item.id" class="block break-words font-semibold text-navy-700 hover:underline">{{ item.title }}</NuxtLink>
+          <span v-if="item.title.includes('測試資料')" class="ui-tag is-test text-sm">測試資料</span>
+          <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-muted">
             <span>{{ workTypeLabels[item.type] }}</span>
             <span aria-hidden="true">·</span>
             <span>{{ priorityLabels[item.priority] }}</span>
           </p>
-          <p v-if="item.type === 'Bug' && item.severity" class="mt-1 text-[11px]" :data-testid="`board-severity-${item.code}`">
-            {{ severityLabels[item.severity].label }}
+          <p v-if="item.type === 'Bug' && item.severity" class="mt-1 text-sm" :data-testid="`board-severity-${item.code}`">
+            <UiPill :tone="severityTone[item.severity]" :label="severityLabels[item.severity].label" />
           </p>
           <label class="mt-2 block">
-            <span class="text-[11px] font-medium text-ink-subtle">變更狀態</span>
+            <span class="text-sm font-medium text-ink-subtle">變更狀態</span>
             <select
-              class="field-input mt-0.5 py-1 text-xs"
+              class="field-input mt-0.5 py-1 text-sm"
               :value="item.status"
               :disabled="busyId === item.id"
               :aria-label="`變更 ${item.code} 狀態`"
@@ -102,9 +106,13 @@ function onSelect(event: Event, item: WorkItem) {
           </label>
         </li>
       </ul>
-      <p v-else class="rounded-lg border border-dashed border-line px-3 py-4 text-center text-xs text-ink-subtle">
+      <p v-else class="rounded-lg border border-dashed border-line px-3 py-4 text-center text-sm text-ink-subtle">
         沒有項目
       </p>
     </section>
   </div>
 </template>
+
+<style scoped>
+.work-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 16px; }
+</style>
