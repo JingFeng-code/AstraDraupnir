@@ -1,3 +1,12 @@
+/**
+ * V2.1 acceptance E2E。**這份 spec 會真的寫資料**（專案、使用者、Gate、報告…）。
+ *
+ * 規則：
+ * 1. 每個建立的標題／顯示名稱都以「測試資料」開頭，UI 才會出現測試資料徽章（A-23）。
+ * 2. 請只在可拋棄的資料庫上跑（例如 CI 或 `draupnir_v21_accept`）；它不會清除自己建立的資料，
+ *    因為 API 的 DELETE 只會 archive，也沒有刪使用者的端點。
+ * 3. 專案 key 與需求代碼都帶隨機值，重跑不會撞號。
+ */
 import { expect, request as requestFactory, test } from '@playwright/test'
 
 const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@draupnir.local'
@@ -16,13 +25,13 @@ test('acceptance: users, roles, members, audit, logout', async ({ baseURL }) => 
   const email = `member-${key.toLowerCase()}@example.test`
   const password = 'Member!2026'
   const admin = await adminApi(baseURL)
-  const projectResponse = await admin.post('/api/projects', { data: { key, name: `Acceptance ${key}` } })
+  const projectResponse = await admin.post('/api/projects', { data: { key, name: `測試資料 Acceptance ${key}` } })
   expect(projectResponse.status()).toBe(201)
   const projectId = (await projectResponse.json()).id
-  const foreign = await admin.post('/api/projects', { data: { key: `B${key.slice(1)}`, name: 'Foreign project' } })
+  const foreign = await admin.post('/api/projects', { data: { key: `B${key.slice(1)}`, name: '測試資料 Foreign project' } })
   expect(foreign.status()).toBe(201)
   const foreignId = (await foreign.json()).id
-  const userResponse = await admin.post('/api/users', { data: { email, displayName: 'Acceptance Member', password, role: 'Member' } })
+  const userResponse = await admin.post('/api/users', { data: { email, displayName: '測試資料 Acceptance Member', password, role: 'Member' } })
   expect(userResponse.status()).toBe(201)
   const userId = (await userResponse.json()).id
   const add = await admin.post(`/api/projects/${projectId}/members`, { data: { userId } })
@@ -68,23 +77,24 @@ test('acceptance: users, roles, members, audit, logout', async ({ baseURL }) => 
 
 test('acceptance: work items, sprint, requirements, import preview, manual gate exception, reject, report', async ({ baseURL, page }) => {
   const key = `P${unique()}`
+  const requirementCode = `REQ-${Math.floor(100000 + Math.random() * 900000)}`
   const admin = await adminApi(baseURL)
-  const project = await (await admin.post('/api/projects', { data: { key, name: `Project ${key}` } })).json()
+  const project = await (await admin.post('/api/projects', { data: { key, name: `測試資料 Project ${key}` } })).json()
   const requirement = await (await admin.post(`/api/projects/${project.id}/requirements`, {
-    data: { code: 'REQ-1', title: 'Initial requirement', body: 'Initial', priority: 'P2', status: 'Draft', source: 'UserAuthorized' },
+    data: { code: requirementCode, title: '測試資料 Initial requirement', body: 'Initial', priority: 'P2', status: 'Draft', source: 'UserAuthorized' },
   })).json()
   const bug = await (await admin.post(`/api/projects/${project.id}/work-items`, {
-    data: { code: `${key}-1`, type: 'Bug', severity: 'S2', title: 'Severity bug', status: 'Ready', priority: 'P1' },
+    data: { code: `${key}-1`, type: 'Bug', severity: 'S2', title: '測試資料 Severity bug', status: 'Ready', priority: 'P1' },
   })).json()
   const task = await (await admin.post(`/api/projects/${project.id}/work-items`, {
-    data: { code: `${key}-2`, type: 'Task', title: 'Dependent task', status: 'Ready', priority: 'P2', requirementId: requirement.id },
+    data: { code: `${key}-2`, type: 'Task', title: '測試資料 Dependent task', status: 'Ready', priority: 'P2', requirementId: requirement.id },
   })).json()
-  const gate = await (await admin.post(`/api/projects/${project.id}/gates`, { data: { title: 'No evidence gate', workItemId: bug.id } })).json()
-  const rejectGate = await (await admin.post(`/api/projects/${project.id}/gates`, { data: { title: 'Reject gate', workItemId: task.id } })).json()
+  const gate = await (await admin.post(`/api/projects/${project.id}/gates`, { data: { title: '測試資料 No evidence gate', workItemId: bug.id } })).json()
+  const rejectGate = await (await admin.post(`/api/projects/${project.id}/gates`, { data: { title: '測試資料 Reject gate', workItemId: task.id } })).json()
   const sprint = await (await admin.post(`/api/projects/${project.id}/sprints`, {
-    data: { name: 'Acceptance sprint', startDate: '2026-11-24', endDate: '2026-11-30', goal: 'Acceptance', status: 'Active' },
+    data: { name: '測試資料 Acceptance sprint', startDate: '2026-11-24', endDate: '2026-11-30', goal: '測試資料 Acceptance', status: 'Active' },
   })).json()
-  await admin.post(`/api/projects/${project.id}/milestones`, { data: { name: 'Acceptance milestone', dueDate: '2026-12-01', status: 'Planned' } })
+  await admin.post(`/api/projects/${project.id}/milestones`, { data: { name: '測試資料 Acceptance milestone', dueDate: '2026-12-01', status: 'Planned' } })
 
   await page.goto('/login')
   await page.getByTestId('login-email').fill(ADMIN_EMAIL)
@@ -97,20 +107,20 @@ test('acceptance: work items, sprint, requirements, import preview, manual gate 
   await page.getByLabel('嚴重度篩選').selectOption('S2')
   await expect(page.getByTestId(`work-item-row-${key}-1`)).toBeVisible()
   await page.getByRole('button', { name: `編輯 ${key}-1` }).click()
-  await page.getByTestId('work-item-title').fill('Severity bug edited')
+  await page.getByTestId('work-item-title').fill('測試資料 Severity bug edited')
   await page.getByTestId('work-item-submit').click()
-  await expect(page.getByTestId(`work-item-row-${key}-1`)).toContainText('Severity bug edited')
+  await expect(page.getByTestId(`work-item-row-${key}-1`)).toContainText('測試資料 Severity bug edited')
   await page.getByTestId('view-board').click()
   await expect(page.getByTestId(`board-card-${key}-1`)).toContainText('S2')
 
   await page.goto(`/projects/${project.id}/requirements`)
   await expect(page.locator('table')).toContainText('Initial requirement')
-  await page.getByRole('button', { name: '編輯 REQ-1' }).click()
-  await page.getByTestId('requirement-title').fill('Edited requirement')
+  await page.getByRole('button', { name: `編輯 ${requirementCode}` }).click()
+  await page.getByTestId('requirement-title').fill('測試資料 Edited requirement')
   await page.getByTestId('requirement-submit').click()
-  await expect(page.locator('table')).toContainText('Edited requirement')
+  await expect(page.locator('table')).toContainText('測試資料 Edited requirement')
   await page.getByLabel('需求狀態篩選').selectOption('Draft')
-  await expect(page.locator('table')).toContainText('Edited requirement')
+  await expect(page.locator('table')).toContainText('測試資料 Edited requirement')
 
   await page.goto(`/projects/${project.id}/sprints`)
   await expect(page.getByTestId(`sprint-${sprint.id}`)).toBeVisible()
@@ -118,13 +128,13 @@ test('acceptance: work items, sprint, requirements, import preview, manual gate 
   await page.getByTestId(`sprint-assign-${sprint.id}`).selectOption(task.id)
   await expect(page.getByTestId(`sprint-${sprint.id}`)).toContainText('0 / 1')
   await page.getByTestId(`sprint-edit-${sprint.id}`).click()
-  await page.getByTestId('sprint-goal').fill('Acceptance edited')
+  await page.getByTestId('sprint-goal').fill('測試資料 Acceptance edited')
   await page.getByTestId('sprint-submit').click()
-  await expect(page.getByTestId(`sprint-${sprint.id}`)).toContainText('Acceptance edited')
+  await expect(page.getByTestId(`sprint-${sprint.id}`)).toContainText('測試資料 Acceptance edited')
 
   await page.goto(`/projects/${project.id}/import`)
   const taskId = `${key}-IMPORT`
-  await page.getByTestId('import-payload').fill(JSON.stringify({ tasks: [{ id: taskId, title: 'Import preview task', status: 'WAITING_HUMAN', requiresHuman: true, repo: 'sandbox' }] }))
+  await page.getByTestId('import-payload').fill(JSON.stringify({ tasks: [{ id: taskId, title: '測試資料 Import preview task', status: 'WAITING_HUMAN', requiresHuman: true, repo: 'sandbox' }] }))
   await expect(page.getByTestId('import-preview')).toContainText('1 個任務')
   await page.getByTestId('import-submit').click()
   await expect(page.getByTestId('import-result')).toContainText('AgentRun 1')
