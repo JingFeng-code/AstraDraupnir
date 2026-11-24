@@ -1,6 +1,6 @@
 # AstraDraupnir V2.1 — 驗收交付（Direction D）
 
-> 交付日期：2026-11-24　　分支：`auto/p7-draupnir-v21`　　**最終 commit：`0c11428`（程式最終 commit；本文件與 `docs/v21/` 在其後的文件 commit）**
+> 交付日期：2026-11-24　　分支：`auto/p7-draupnir-v21`　　**程式最終 commit：`0c11428`；其後只有文件與 E2E 標記修正（`3559164`、`ccd9b76`、`64eca5c`）**
 > 本文件是給產品驗收（ChatGPT 獨立審查）的入口。所有數字與狀態都對應上面的最終 commit；過期結果不會拿來充數。
 
 ## 0. 一句話結論
@@ -76,7 +76,7 @@ PASS = 我（Tech Lead）在最終 commit 上實際跑過並看到結果；測�
 | A-20 | 重啟後資料仍在 | PASS | 重啟 API 後同一個專案／Spool 證據仍可讀 |
 | A-21 | 深淺主題、1440 與 390、無水平捲動 | PASS | 我方 8 頁 × 2 主題：overflow 0；既有 36 組整合截圖 0 axe/overflow |
 | A-22 | V2 回歸：原交付 E2E 仍通過 | PASS | `npm run test:e2e` → **22 passed**（我獨立重跑，隔離 DB） |
-| A-23 | 測試資料標記 | PASS | `isTestData` + `ui-tag is-test`（agents/index/UiChain/WorkItemBoard）；截圖可證 |
+| A-23 | 測試資料標記 | PASS | `isTestData` + `ui-tag is-test`（agents/index/UiChain/WorkItemBoard）；**驗收 E2E 建立的資料全部以「測試資料」開頭**（T74c 發現後修正，`64eca5c`），且只在可拋棄的 DB 上執行 |
 
 ## 4. Astra 生態系整合（B）
 
@@ -92,6 +92,7 @@ PASS = 我（Tech Lead）在最終 commit 上實際跑過並看到結果；測�
 ## 5. 安全與人工政策
 
 - 已修（本次）：**Gate 證據規則在後端強制**（`GateRules`，缺少通過證據／有失敗證據／審查要求修改時，核准必須是帶固定前綴且 ≥20 字理由的人工例外）。獨立審查的 delta review（T74b）判定 **OK**：前後端條件、19 字前綴、20 字規則逐字一致，主要繞過路徑（無證據直接核准、偽造備註、已決定重送、非 admin、只有 NotTested、證據挂別的項目）都被擋下，新測試確實會在移除規則時失敗。
+- 第二次獨立審查（T74c，只看合併後的 delta `6c0602c..0c11428`）：F-02（匯入 admin-only）、合併解析（Gate 規則未被削弱）、稽核覆蓋（A-18 三類都有，detail 不含密碼/token/payload）、migration（僅 `DROP NOT NULL`，additive）全部 **OK**；唯一 must-fix 是驗收 E2E 沒清理且未標測試資料，已在 `64eca5c` 修正並重跑 26 passed。
 - 已知語意（刻意）：沒有 `workItemId` 的 Gate 是「人工判斷」，任何 admin 都可以用任意備註核准（前端與後端一致）。這與「Supervisor 匯入的 gate 沒有人類可驗證證據」相符；T74b 建議要求最低理由，列入 §10。
 - - 已修（本次）：**Supervisor 匯入與 Spool 證據匯入改為 Admin-only**（成員 403、UI 隱藏入口、寫入都留稽核，且只記 counts／command/status/hash，不記內容），避免成員自行製造 Pass 證據再讓 admin 核准。
 - 已驗證：IDOR 全面以專案成員資格檢查（非成員 403、清單不列出）；child 路由用 route 的 projectId 覆寫 body；`/users`、`/audit`、成員管理、Gate 決定 admin-only；已決定的 Gate 重送 409（Status 是 concurrency token）。
