@@ -181,6 +181,19 @@ PR #5 被 ChatGPT 判為 Conditional NO-GO；以下每一項都在本分支修�
 
 `Requirement.Code` 的格式是 `REQ-n`，唯一性範圍是**同一專案內**（DB 唯一索引 `(ProjectId, Code)`，重複回 409）；不同專案可以各自有 `REQ-1`。E2E 已改用隨機 `REQ-<6 位數>`，不會再撞號。**若你要的是全域唯一（跨專案也不能重號）**，那是一次資料模型變更（需要 migration 改寫既有編號成 `<KEY>-REQ-n`），本輪先以文件與測試明確界定現行語意，請在複審時裁決是否要改。
 
+### 第二輪複審殘留（R2-01～R2-04，本輪）
+
+| Finding | 重現 | 根因 | 修正 | 修正前 → 後 |
+|---|---|---|---|---|
+| **R2-01** Gate 來源識別碰撞（High） | 是：同一專案、兩個來源實例、同一個 `TASK-001` → 共用一個 Gate | Gate 只用 `ProjectId + ExternalRef`，預設 ref `supervisor:{id}` 不含來源實例 | `Project.SourceInstance` 在第一次匯入時凍結（migration 用當下的 Key backfill）；預設 ref 改為 `supervisor:{instance}:{id}`；升級前的 `supervisor:{id}` 會被**接手改名**而不是重建 | 修正前：第二個來源拿不到自己的 Gate；修正後 4 個測試（各自獨立、A 核准不影響 B、同來源冪等、改名後 namespace 不變、legacy 接手） |
+| **R2-02** 最新 attempt 分組漏 task id（High） | 是：同來源 TASK-A Fail、TASK-B Pass 被合成一個最新桶 | 只用 `Source + SourceInstance` 分組 | 改成 `Source + SourceInstance + ExternalTaskId`，前後端一致 | `ApiEvidenceRuleTests`（T-A Fail + T-B Pass → 400；T-A 重試 Pass → 200）＋前端同情境單元測試 |
+| **R2-03** 決策證據快照不完整（Medium） | 是 | 只存 id 與統計；讀取與寫入不在同一交易 | 決策在一個 SERIALIZABLE 交易內完成；快照存實際使用的證據（kind/result/時間/來源實例/task/attempt/內容雜湊）與審查結論 | 核准後重新匯入並把證據改成 Fail → 快照（canonical JSON）與狀態不變 |
+| **R2-04** E2E 寫入目標不一致（Medium） | 是：`E2E_REUSE=1` 可重用別的 server | 重用伺服器略過守門 | 移除重用（永遠自己起 `.output`）；API 以 `E2E_INSTANCE_TOKEN` 回報 `instance`，E2E 必須設定相同的 `E2E_EXPECTED_INSTANCE` | 錯誤/缺少 instance → 第一次寫入前 exit 1 |
+
+**Migration 對歷史證據的影響（誠實說明）**：`GateEvidenceIntegrity` 為 `WorkItems` 加了 `UpdatedAt`；既有工作項目的 `UpdatedAt` 在 migration 時被填成當下時間，因此**該時間點之前產生的證據都會被視為過期**，不能單獨支撐直接核准——需要重新產生證據，或由 Admin 走人工例外（有前綴＋20 字理由，會留快照與稽核）。這是刻意的 fail-closed 行為，不是資料遺失。
+
+**登入節流**：程式與文件一致（同一 email 10 分鐘內失敗 5 次 → 429；`v2/README.md` Security policy 表與 §2 都這樣寫）。**Review Desk 的純人工 Gate** 也要求 ≥20 字理由（前端驗證＋API 驗證）。**需求編號**依正式決策維持專案內唯一，沒有新增 migration。
+
 ## 8.1 GitHub 交付（Draft PR #5）
 
 - PR：**https://github.com/JingFeng-code/AstraDraupnir/pull/5**（Draft、base `main`、head `auto/p7-draupnir-v21`）。
