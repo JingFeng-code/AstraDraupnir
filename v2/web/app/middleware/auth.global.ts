@@ -8,6 +8,6 @@ export default defineNuxtRouteMiddleware(async (to) => {
     return navigateTo({ path: '/login', query: { redirect: to.fullPath } })
   }
   if (auth.state.value.user && to.path === '/login') {
-    return navigateTo('/projects')
+    return navigateTo('/')
   }
 })

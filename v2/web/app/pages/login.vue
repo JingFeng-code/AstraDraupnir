@@ -11,7 +11,7 @@ const error = ref<ApiError | null>(null)
 
 const redirect = computed(() => {
   const target = route.query.redirect
-  return typeof target === 'string' && target.startsWith('/') ? target : '/projects'
+  return typeof target === 'string' && target.startsWith('/') ? target : '/'
 })
 
 async function submit() {

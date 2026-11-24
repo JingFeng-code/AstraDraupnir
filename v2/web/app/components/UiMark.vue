@@ -1,0 +1,32 @@
+<script setup lang="ts">
+import type { Tone } from '~/lib/engineering'
+
+/** A status as shape and color together. proven: filled disc, moving: half disc, needs: diamond, fault: square, idle: ring. */
+const props = withDefaults(defineProps<{ tone: Tone, dashed?: boolean, size?: number, label?: string }>(), { size: 14 })
+</script>
+
+<template>
+  <span class="um" :class="`um-${props.tone}`" :role="props.label ? 'img' : undefined" :aria-label="props.label" :aria-hidden="props.label ? undefined : true">
+    <svg :width="props.size" :height="props.size" viewBox="0 0 14 14" focusable="false">
+      <template v-if="props.tone === 'proven'"><circle cx="7" cy="7" r="5.5" fill="currentColor" /></template>
+      <template v-else-if="props.tone === 'moving'">
+        <circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.8" />
+        <path d="M7 2a5 5 0 0 0 0 10z" fill="currentColor" />
+      </template>
+      <template v-else-if="props.tone === 'needs'"><path d="M7 1 13 7 7 13 1 7z" fill="currentColor" /></template>
+      <template v-else-if="props.tone === 'fault'"><rect x="2" y="2" width="10" height="10" rx="1.5" fill="currentColor" /></template>
+      <template v-else>
+        <circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.8" :stroke-dasharray="props.dashed ? '2.2 2.2' : undefined" />
+      </template>
+    </svg>
+  </span>
+</template>
+
+<style>
+.um { display: inline-flex; flex: none; line-height: 0; }
+.um-proven { color: var(--c-fix); }
+.um-moving { color: var(--c-move); }
+.um-needs { color: var(--c-need); }
+.um-fault { color: var(--c-fault); }
+.um-idle { color: var(--c-idle); }
+</style>
