@@ -333,6 +333,79 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
     }
 
     [Fact]
+    public async Task ProjectStatusCanOnlyBeChangedByAnAdmin()
+    {
+        using var admin = await AuthorizedClient();
+        var project = await NewProject(admin, "ARCH");
+        var email = "arch-member@example.test";
+        var password = "Arch-member-pass-1";
+        var memberId = (await Json(await admin.PostAsJsonAsync("/api/users",
+            new { email, displayName = "Arch member", password, role = "Member" }))).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/projects/{project}/members", new { userId = memberId })).StatusCode);
+        using var member = NewClient();
+        await LoginAs(member, email, password);
+
+        // 成員可以改一般欄位
+        var renamed = await member.PutAsJsonAsync($"/api/projects/{project}", new { key = "ARCH", name = "Renamed by member" });
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+        Assert.Equal("Renamed by member", (await Json(renamed)).GetProperty("name").GetString());
+
+        // 但不能封存（Status 變更只有 Admin）
+        var archive = await member.PutAsJsonAsync($"/api/projects/{project}", new { key = "ARCH", name = "Renamed by member", status = "Archived" });
+        Assert.Equal(HttpStatusCode.Forbidden, archive.StatusCode);
+        Assert.Equal("Active", (await Json(await admin.GetAsync($"/api/projects/{project}"))).GetProperty("status").GetString());
+
+        // 也不能解除封存
+        Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync($"/api/projects/{project}", new { key = "ARCH", name = "Archived", status = "Archived" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await member.PutAsJsonAsync($"/api/projects/{project}", new { key = "ARCH", name = "Archived", status = "Active" })).StatusCode);
+        Assert.Equal("Archived", (await Json(await admin.GetAsync($"/api/projects/{project}"))).GetProperty("status").GetString());
+
+        // Admin 可以解除封存
+        Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync($"/api/projects/{project}", new { key = "ARCH", name = "Archived", status = "Active" })).StatusCode);
+        Assert.Equal("Active", (await Json(await admin.GetAsync($"/api/projects/{project}"))).GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task ConcurrentDemotionsCannotRemoveTheLastActiveAdministrator()
+    {
+        using var adminA = await AuthorizedClient();
+        var idA = (await Json(await adminA.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid();
+        var emailB = "admin-b@example.test";
+        var passwordB = "Admin-b-pass-1";
+        var idB = (await Json(await adminA.PostAsJsonAsync("/api/users",
+            new { email = emailB, displayName = "Admin B", password = passwordB, role = "Admin" }))).GetProperty("id").GetGuid();
+        var emailC = "admin-c@example.test";
+        var passwordC = "Admin-c-pass-1";
+        await Json(await adminA.PostAsJsonAsync("/api/users", new { email = emailC, displayName = "Admin C", password = passwordC, role = "Admin" }));
+        using var adminB = NewClient();
+        await LoginAs(adminB, emailB, passwordB);
+
+        using var barrier = new Barrier(2);
+        async Task<HttpStatusCode> Deactivate(HttpClient client, Guid target)
+        {
+            barrier.SignalAndWait();
+            var response = await client.PatchAsJsonAsync($"/api/users/{target}", new { isActive = false });
+            return response.StatusCode;
+        }
+
+        var first = Task.Run(() => Deactivate(adminA, idB));
+        var second = Task.Run(() => Deactivate(adminB, idA));
+        var codes = await Task.WhenAll(first, second);
+
+        Assert.Contains(codes, code => code == HttpStatusCode.OK);
+        Assert.Contains(codes, code => code != HttpStatusCode.OK);
+        // 不論哪一個成功，系統必須還有至少一位有效 Admin（C 沒有被動到）
+        using var verifier = NewClient();
+        await LoginAs(verifier, emailC, passwordC);
+        var users = await Json(await verifier.GetAsync("/api/users"));
+        Assert.True(users.EnumerateArray().Count(u => u.GetProperty("role").GetString() == "Admin" && u.GetProperty("isActive").GetBoolean()) >= 1);
+
+        // 還原種子管理員，避免影響同一測試資料庫中其他測試的登入。
+        Assert.Equal(HttpStatusCode.OK, (await verifier.PatchAsJsonAsync($"/api/users/{idA}", new { isActive = true })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await verifier.PatchAsJsonAsync($"/api/users/{idB}", new { isActive = true })).StatusCode);
+    }
+
+    [Fact]
     public async Task BothRealSupervisorFormatsImportIdempotently()
     {
         using var client = await AuthorizedClient();

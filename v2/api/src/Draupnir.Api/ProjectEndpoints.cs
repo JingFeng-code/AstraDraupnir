@@ -40,21 +40,30 @@ public static class ProjectEndpoints
             return Results.Created($"/api/projects/{input.Id}", input);
         });
 
-        api.MapPut("/projects/{id:guid}", async (Guid id, Project input, ClaimsPrincipal principal, DraupnirDb db) =>
+        api.MapPut("/projects/{id:guid}", async (Guid id, ProjectUpdateInput input, ClaimsPrincipal principal, DraupnirDb db) =>
         {
             if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
-            if (!await db.Projects.AnyAsync(p => p.Id == id)) return Missing();
-            if (!await Access.CanProject(db, user, id)) return Access.Forbidden();
-            if (Validate(input) is { } invalid) return invalid;
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
             if (await db.Projects.FindAsync(id) is not { } project) return Missing();
+            if (!await Access.CanProject(db, user, id)) return Access.Forbidden();
+            if (Validate(input) is { } invalid) return invalid;
+            // 狀態（封存／解除封存）只有 Admin 能改；一般成員只能改名稱／描述／repo 路徑。
+            var requested = input.Status;
+            var statusChanged = requested is { } value && value != project.Status;
+            if (statusChanged && !Access.IsAdmin(user)) return Access.Forbidden();
             if (project.Key != input.Key && await db.WorkItems.AnyAsync(x => x.ProjectId == id))
                 return Conflict("The project key cannot change after work item codes exist.");
-            input.Id = id;
-            input.CreatedAt = project.CreatedAt;
-            input.UpdatedAt = DateTimeOffset.UtcNow;
-            db.Entry(project).CurrentValues.SetValues(input);
-            await Access.Audit(db, user.Id, "project.update", "project", project.Id, $"key={project.Key};status={project.Status}");
+            var previousStatus = project.Status;
+            project.Key = input.Key;
+            project.Name = input.Name;
+            project.Description = input.Description ?? "";
+            project.RepoPath = input.RepoPath;
+            if (statusChanged) project.Status = requested!.Value;
+            project.UpdatedAt = DateTimeOffset.UtcNow;
+            await Access.Audit(db, user.Id, statusChanged ? "project.status" : "project.update", "project", project.Id,
+                statusChanged
+                    ? $"key={project.Key};status={previousStatus}->{project.Status}"
+                    : $"key={project.Key}");
             await db.SaveChangesAsync();
             await tx.CommitAsync();
             return Results.Ok(project);
@@ -240,5 +249,15 @@ public static class ProjectEndpoints
     }
 
     public sealed record StatusChange(WorkStatus? Status, string? Reason);
+
+    /// <summary>PUT /projects/{id} 的專用輸入：Id／CreatedAt 不可由用戶端指定，狀態變更另外檢查 Admin。</summary>
+    public sealed record ProjectUpdateInput(
+        [property: System.ComponentModel.DataAnnotations.Required]
+        [property: System.ComponentModel.DataAnnotations.RegularExpression("^[A-Z]{2,10}$")] string Key,
+        [property: System.ComponentModel.DataAnnotations.Required]
+        [property: System.ComponentModel.DataAnnotations.MaxLength(200)] string Name,
+        string? Description,
+        string? RepoPath,
+        ProjectStatus? Status);
     public sealed record DependencyInput(Guid? DependsOnId);
 }

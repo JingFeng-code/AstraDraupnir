@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using static Draupnir.Api.ApiRules;
+using System.Data;
 
 namespace Draupnir.Api;
 
@@ -43,6 +44,9 @@ public static class UserEndpoints
         {
             if (await Access.Current(db, principal) is not { } actor) return Access.Unauthorized();
             if (!Access.IsAdmin(actor)) return Access.Forbidden();
+            // 最後一位有效 Admin 的 invariant 必須在交易內檢查：兩個同時送出的停用／降階請求
+            // 若各自讀到「還有 2 位」，就會同時通過。SERIALIZABLE 讓其中一個在提交時失敗（409）。
+            await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
             if (await db.Users.FindAsync(id) is not { } user) return Missing();
             if (input.DisplayName is null && input.Role is null && input.IsActive is null && input.Password is null)
                 return Invalid("body", "Provide at least one field to change.");
@@ -67,6 +71,7 @@ public static class UserEndpoints
             await Access.Audit(db, actor.Id, "user.update", "user", user.Id,
                 $"role={user.Role}; active={user.IsActive}; passwordReset={input.Password is not null}");
             await db.SaveChangesAsync();
+            await tx.CommitAsync();
             return Results.Ok(new { user.Id, user.Email, user.DisplayName, user.Role, user.IsActive, user.CreatedAt });
         });
 
