@@ -51,7 +51,7 @@
 
 | Review | Scope | Verdict |
 |---|---|---|
-| T79 | Delta review of `c81144a..cdf0ee1` | **0 must-fix**; 1 low residual (a crafted custom ref that literally equals another instance's namespaced ref could still claim a *Pending* gate — no human decision can be moved; recorded as a follow-up) |
+| T79 | Delta review of `c81144a..cdf0ee1` | **0 must-fix**; 1 low residual, recorded with its trigger and impact in `docs/v21/BACKLOG.md` (L-01) |
 
 ChatGPT's final pinpoint review of `c81144a` was **GO for UAT** with V2.1 feature-frozen; A-11, A-14, the dedicated icon set/logo, live sync and Supervisor write-back are deferred to a later version.
 
