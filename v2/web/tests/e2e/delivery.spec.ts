@@ -156,7 +156,7 @@ test.describe('Draupnir V2 交付流程（真實 API + PostgreSQL）', () => {
     await expect(dialog).toBeVisible()
     await expect(dialog).toContainText('批准這個 Human Gate？')
     await assertAxeClean(page, 'Gate 確認對話框')
-    await dialog.getByTestId('gate-note').fill('E2E 批准')
+    await dialog.getByTestId('gate-note').fill('E2E 批准：這是本機驗證用的人工判斷理由。')
     await dialog.getByRole('button', { name: '確認批准' }).click()
     await expect(dialog).toBeHidden()
     await expect(gateRow).toContainText('已批准')

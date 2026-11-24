@@ -56,6 +56,10 @@ namespace Draupnir.Api.Migrations
                     b.Property<int>("Source")
                         .HasColumnType("integer");
 
+                    b.Property<string>("SourceInstance")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -72,7 +76,7 @@ namespace Draupnir.Api.Migrations
 
                     b.HasIndex("WorkItemId");
 
-                    b.HasIndex("Source", "ExternalTaskId", "Attempt")
+                    b.HasIndex("Source", "SourceInstance", "ExternalTaskId", "Attempt")
                         .IsUnique();
 
                     b.ToTable("AgentRuns");
@@ -216,6 +220,9 @@ namespace Draupnir.Api.Migrations
 
                     b.Property<Guid?>("DecidedBy")
                         .HasColumnType("uuid");
+
+                    b.Property<JsonElement?>("EvidenceSnapshot")
+                        .HasColumnType("jsonb");
 
                     b.Property<string>("ExternalRef")
                         .HasColumnType("text");
@@ -468,11 +475,11 @@ namespace Draupnir.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<int>("Role")
-                        .HasColumnType("integer");
-
                     b.Property<Guid>("SecurityStamp")
                         .HasColumnType("uuid");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
@@ -543,6 +550,9 @@ namespace Draupnir.Api.Migrations
 
                     b.Property<int>("Type")
                         .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 

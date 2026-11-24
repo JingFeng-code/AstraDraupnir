@@ -1,6 +1,7 @@
 # AstraDraupnir V2.1 — 驗收交付（Direction D）
 
 > 交付日期：2026-11-24　　分支：`auto/p7-draupnir-v21`　　**程式最終 commit：`0c11428`；其後只有文件與 E2E 測試資料標記的修正（清單見 `git log 0c11428..HEAD`）**
+> T75 修正分支：`auto/p7-v21-fix2` (HEAD)，尚未合併；F-03／F-04／F-05 的語意見 §5.1。
 > 本文件是給產品驗收（ChatGPT 獨立審查）的入口。所有數字與狀態都對應上面的最終 commit；過期結果不會拿來充數。
 
 ## 0. 一句話結論
@@ -93,21 +94,55 @@ PASS = 我（Tech Lead）在最終 commit 上實際跑過並看到結果；測�
 
 - 已修（本次）：**Gate 證據規則在後端強制**（`GateRules`，缺少通過證據／有失敗證據／審查要求修改時，核准必須是帶固定前綴且 ≥20 字理由的人工例外）。獨立審查的 delta review（T74b）判定 **OK**：前後端條件、19 字前綴、20 字規則逐字一致，主要繞過路徑（無證據直接核准、偽造備註、已決定重送、非 admin、只有 NotTested、證據挂別的項目）都被擋下，新測試確實會在移除規則時失敗。
 - 第二次獨立審查（T74c，只看合併後的 delta `6c0602c..0c11428`）：F-02（匯入 admin-only）、合併解析（Gate 規則未被削弱）、稽核覆蓋（A-18 三類都有，detail 不含密碼/token/payload）、migration（僅 `DROP NOT NULL`，additive）全部 **OK**；唯一 must-fix 是驗收 E2E 沒清理且未標測試資料，已在 `64eca5c` 修正並重跑 26 passed。
-- 已知語意（刻意）：沒有 `workItemId` 的 Gate 是「人工判斷」，任何 admin 都可以用任意備註核准（前端與後端一致）。這與「Supervisor 匯入的 gate 沒有人類可驗證證據」相符；T74b 建議要求最低理由，列入 §10。
+- 已知語意（T75 起）：沒有 `workItemId` 的 Gate 仍是「人工判斷」，但核准必須寫明至少 20 字理由，理由會寫入 `gate.decision` 稽核列；前端對話框同步要求。
 - - 已修（本次）：**Supervisor 匯入與 Spool 證據匯入改為 Admin-only**（成員 403、UI 隱藏入口、寫入都留稽核，且只記 counts／command/status/hash，不記內容），避免成員自行製造 Pass 證據再讓 admin 核准。
 - 已驗證：IDOR 全面以專案成員資格檢查（非成員 403、清單不列出）；child 路由用 route 的 projectId 覆寫 body；`/users`、`/audit`、成員管理、Gate 決定 admin-only；已決定的 Gate 重送 409（Status 是 concurrency token）。
 - 已知限制：OpenAPI 匿名可讀（本機工具）；沒有登入 rate limit；cookie 無 security stamp／絕對到期（§10）。
 - 證據關聯語意：API 以 `WorkItemId` 為準；前端的追溯頁另外接受「只挂 agent run」的證據（`buildTrace`）。目前的寫入端都會帶 `WorkItemId`，所以兩者一致；若未來新增只挂 run 的寫入，後端會要求例外（T74b B-01，列入 §10）。
+
+## 5.1 T75 修正（F-03／F-04／F-05）
+
+T75 在 `auto/p7-v21-fix2` 修正三個獨立審查 finding；本節是語意與重跑入口，不是新的產品功能。
+
+### F-03 Supervisor 匯入身分
+
+`AgentRun` 新增 `SourceInstance`。匯入身分 = `Source` + `SourceInstance` + `ExternalTaskId` + `Attempt`；查詢與唯一索引都包含它。`?sourceInstance=` 優先，否則使用 payload 的 `sourceInstance`、第一個 task 的 `repo`／`worktree`／`state`，最後才是 `supervisor`；**不使用 project id**，所以專案重建後仍可冪等重匯。同一個 task id 在兩個 source instance 是兩筆獨立 run；同一 source instance 重匯同一 attempt 仍更新原 run。`AddAgentRunSourceInstance` 先把既有列以所屬 project key 回填（孤兒列 `legacy`），再建新唯一索引、移除舊索引。
+
+### F-04 Human Gate 證據完整性
+
+- 必要證據只取每個來源（`Source`+`SourceInstance`）的**最新 attempt**；舊 attempt 的 Fail 不會永久擋住後來通過的重試。
+- 證據 `RecordedAt` 早於工作項目 `UpdatedAt` 視為 **stale**，不能單獨作為核准依據；stale／舊 attempt 的 ID 仍留在 snapshot 供稽核。
+- `Pass` 必要；`Fail` 與 `ChangesRequested` 直接擋核准；`Blocked`、`NotTested` 不是通過，只有它們時仍須人工例外。
+- 工作項目 Gate 的人工例外維持固定前綴＋≥20 字理由＋Admin-only，沒有放寬。
+- 沒有工作項目的 Gate：核准需 ≥20 字理由，寫入稽核；駁回不強制理由。
+- 每次決定都寫 `EvidenceSnapshot`（評估時間、工作項目更新時間、最新 attempts、各 result counts、使用／stale／忽略的 evidence 與 review IDs、是否使用例外、人工理由），migration additive。
+- 後端仍是唯一強制點；`app/lib/evidenceRules.ts` 同步顯示最新 attempt／stale 規則。
+
+### F-05 E2E 寫入隔離
+
+Playwright `global-setup` 在任何測試寫入前 fail-closed：必須 `E2E_ALLOW_WRITE=1`、`E2E_STATE_DIR` 可寫、`NUXT_API_BASE` 是 loopback，且匿名 `GET /api/health` 回報 `status=ok`、`disposable=true`；`draupnir`／`draupnir_v21`／`draupnir_design` 一律拒絕。health 只回 DB 名稱與可拋棄標記，不含資料。安全指令：
+
+```powershell
+cd v2\web
+$env:E2E_ALLOW_WRITE='1'
+$env:E2E_STATE_DIR='E:\Astra\.cache\tmp\t75-e2e-state'
+$env:E2E_ADMIN_PASSWORD='<被測 API 管理員密碼>'
+$env:NUXT_API_BASE='http://127.0.0.1:5088'
+$env:E2E_PORT='4950'
+npm run test:e2e
+```
+
+`npx vitest run tests/unit/e2eGuard.test.ts` 證明缺少 opt-in、非 loopback、preview DB、讀不到 health 都會被拒絕。
 
 ## 6. 測試與原始結果
 
 | 項目 | 指令 | 結果 |
 |---|---|---|
 | API build | `dotnet build --no-restore` | 0 warnings / 0 errors |
-| API tests | `dotnet test --no-restore`（隔離 DB，自動建立／刪除 `draupnir_test_<guid>`） | **32 passed / 0 failed**（32 個測試；每個測試自建／自刪 `draupnir_test_<guid>`） |
+| API tests | `dotnet test --no-restore`（隔離 DB，自動建立／刪除 `draupnir_test_<guid>`） | **36 passed / 0 failed**（T75 後 36 個測試；每個測試自建／自刪 `draupnir_test_<guid>`） |
 | Web typecheck | `npx nuxt typecheck` | exit 0 |
-| Web unit/component | `npx vitest run` | **40 passed / 0 failed**（11 個檔案） |
-| E2E（桌面＋390px，真實 API + PostgreSQL） | `NUXT_API_BASE=… npm run test:e2e` | **26 passed**（delivery + acceptance + a11y-keyboard；桌面＋390px，40.5 秒） |
+| Web unit/component | `npx vitest run` | **48 passed / 0 failed**（T75 後 12 個檔案） |
+| E2E（桌面＋390px，真實 API + PostgreSQL） | `E2E_ALLOW_WRITE=1 … npm run test:e2e` | **26 passed**（T75 guard 開啟）（delivery + acceptance + a11y-keyboard；桌面＋390px，40.5 秒） |
 | Stylus 報告 | `astra-stylus render … --format docx` + `quality verify-content` | exit 0 / `ok:true` |
 | 截圖＋axe＋overflow | `product-shots.cjs`（T70/T71/T72/integration/T73） | T73 兩輪各 **56 views** ＋整合 36 views；所有視圖 **0 serious/critical axe、0 水平溢出、0 頁面錯誤**，0 serious/critical axe、0 水平溢出 |
 
@@ -118,6 +153,9 @@ PASS = 我（Tech Lead）在最終 commit 上實際跑過並看到結果；測�
 | D-01 | 直接 `curl` 就能在沒有證據時核准 Human Gate | 證據規則只在前端 | 後端 `GateRules`＋端點檢查（`f1806bb`） | API 測試（無證據 400、例外 200、駁回 200） |
 | D-02 | 交付報告 Markdown 捲動區無法用鍵盤聚焦（首輪 E2E 抓到） | 捲動容器沒有 tabindex／名稱 | 具名可聚焦區域 | E2E 全綠（交接文件） |
 | D-03 稽核覆蓋不足（登入／匯入／報告等沒寫入）→ 補齊 17 種 action 並加測試；D-04 成員可偽造證據（Supervisor/Spool 匯入只檢查成員）→ 改為 Admin-only＋稽核；D-05 `import`/`evidence` 在 390px 出現 16px 水平溢出 → 修 `.ui-stack` 子項 `min-width:0`，重跑截圖 0 溢出 | | | | |
+| D-06 Supervisor 同 task id 跨來源衝突／覆寫 | run 查詢與唯一索引只有 Source+ExternalTaskId+Attempt | `SourceInstance`＋`AddAgentRunSourceInstance` 回填 | `F03SameTaskIdInTwoSourceInstancesStaysSeparate`；重匯同 source 仍 1 筆 |
+| D-07 Gate 可能被舊 attempt 的 Fail 永久卡住、無法稽核決策當時證據 | 只檢查全部證據與當下結果 | `GateRules.Evaluate` 取最新 attempt、排除 stale、`EvidenceSnapshot` | 6 個 Gate API 測試：missing／Fail／Changes／NotTested／Blocked／例外／stale／舊 Fail→新 Pass |
+| D-08 無工作項目 Gate 可空白核准；E2E 可誤寫 preview | 沒有理由要求；E2E 沒有寫入保護 | ≥20 字理由＋稽核；health／opt-in fail-closed guard | `GateManualException...`、`e2eGuard.test.ts`、實際 E2E 26 passed |
 
 ## 8. GitHub 交付（等你授權 push）
 
@@ -147,9 +185,9 @@ PASS = 我（Tech Lead）在最終 commit 上實際跑過並看到結果；測�
 - 深色主題下少數標籤對比再檢查（T70 已修一輪，持續監看）。
 - 表格在 390px 的密度與「展開列」互動。
 - 登入頁的錯誤訊息與 rate-limit 提示。
-- 沒有 `workItemId` 的 Gate 要求最低理由（T74b B-02）。
+- ~~沒有 `workItemId` 的 Gate 要求最低理由~~（T75 已修）。
 - 把證據關聯改成「WorkItemId 或該工作項目的 agent run」單一規則（T74b B-01）。
-- 補整合測試：只有 NotTested、有 Fail、有 ChangesRequested、空白備註、別的工作項目的證據、重複決定（T74b B-03）。
+- ~~補整合測試：只有 NotTested、有 Fail、有 ChangesRequested、空白備註、別的工作項目的證據、重複決定~~（T75 已補）。
 
 ## 11. 截圖索引
 

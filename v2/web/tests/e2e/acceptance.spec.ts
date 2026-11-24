@@ -49,12 +49,18 @@ test('acceptance: users, roles, members, audit, logout', async ({ baseURL }) => 
   expect((await member.get(`/api/projects/${foreignId}`)).status()).toBe(403)
   expect((await member.post('/api/projects', { data: { key: `C${key.slice(1)}`, name: 'No' } })).status()).toBe(403)
 
+  // 角色變更會輪替 security stamp：舊 session 立即失效，必須重新登入。
   expect((await admin.patch(`/api/users/${userId}`, { data: { role: 'Admin' } })).status()).toBe(200)
-  expect((await (await member.get('/api/auth/me')).json()).role).toBe('Admin')
+  expect((await member.get('/api/auth/me')).status()).toBe(401)
+  const memberAsAdmin = await requestFactory.newContext({ baseURL })
+  expect((await memberAsAdmin.post('/api/auth/login', { data: { email, password } })).status()).toBe(200)
+  expect((await (await memberAsAdmin.get('/api/auth/me')).json()).role).toBe('Admin')
   expect((await admin.patch(`/api/users/${userId}`, { data: { role: 'Member' } })).status()).toBe(200)
+  const memberAgain = await requestFactory.newContext({ baseURL })
+  expect((await memberAgain.post('/api/auth/login', { data: { email, password } })).status()).toBe(200)
   expect((await admin.delete(`/api/projects/${projectId}/members/${userId}`)).status()).toBe(204)
-  expect((await member.get(`/api/projects/${projectId}`)).status()).toBe(403)
-  const afterRemove = await (await member.get('/api/projects')).json()
+  expect((await memberAgain.get(`/api/projects/${projectId}`)).status()).toBe(403)
+  const afterRemove = await (await memberAgain.get('/api/projects')).json()
   expect(afterRemove.some((p: { id: string }) => p.id === projectId)).toBe(false)
 
   const audit = await (await admin.get('/api/audit')).json()
@@ -64,8 +70,8 @@ test('acceptance: users, roles, members, audit, logout', async ({ baseURL }) => 
 
   // SpoolEndpoints 會把 command 當成 Evidence.Title，所以 command 也要帶測試資料標記。
   const spool = { schema: 'spool-result/v1', command: '測試資料 check', status: 'pass', exitCode: 0, findings: [], counts: {} }
-  expect((await member.post(`/api/projects/${projectId}/spool-results`, { data: spool })).status()).toBe(403)
-  expect((await member.post(`/api/import/supervisor?projectId=${projectId}`, { data: { tasks: [] } })).status()).toBe(403)
+  expect((await memberAgain.post(`/api/projects/${projectId}/spool-results`, { data: spool })).status()).toBe(403)
+  expect((await memberAgain.post(`/api/import/supervisor?projectId=${projectId}`, { data: { tasks: [] } })).status()).toBe(403)
   expect((await admin.post(`/api/projects/${projectId}/spool-results`, { data: spool })).status()).toBe(201)
   expect((await admin.post(`/api/import/supervisor?projectId=${projectId}`, { data: { tasks: [] } })).status()).toBe(200)
   const auditAfter = await (await admin.get('/api/audit')).json()
@@ -78,7 +84,7 @@ test('acceptance: users, roles, members, audit, logout', async ({ baseURL }) => 
   expect((await member.get('/api/projects')).status()).toBe(401)
   expect((await admin.post('/api/auth/logout')).status()).toBe(204)
   expect((await admin.get('/api/projects')).status()).toBe(401)
-  await admin.dispose(); await member.dispose()
+  await admin.dispose(); await memberAgain.dispose()
 })
 
 test('acceptance: work items, sprint, requirements, import preview, manual gate exception, reject, report', async ({ baseURL, page }) => {

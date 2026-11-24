@@ -10,7 +10,7 @@ namespace Draupnir.Api;
 
 public static class SupervisorImport
 {
-    public static async Task<IResult> Import(JsonElement payload, Guid? projectId, DraupnirDb db, Guid? actorUserId = null)
+    public static async Task<IResult> Import(JsonElement payload, Guid? projectId, DraupnirDb db, Guid? actorUserId = null, string? sourceInstance = null)
     {
         if (Get(payload, "tasks").ValueKind != JsonValueKind.Array)
             return Invalid("tasks", "Provide a Supervisor object with a tasks array.");
@@ -22,6 +22,7 @@ public static class SupervisorImport
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         var projects = await db.Projects.ToListAsync();
         if (projectId is not null && !projects.Any(p => p.Id == projectId)) return Missing();
+        var instance = ResolveSourceInstance(payload, sourceInstance);
         var agents = Get(payload, "agents");
         var seenRuns = new HashSet<Guid>();
         var seenEvidence = new HashSet<Guid>();
@@ -33,12 +34,12 @@ public static class SupervisorImport
             var status = Text(row, "status")!.Trim();
             var attempt = Attempt(row);
             var run = db.AgentRuns.Local.FirstOrDefault(r => r.Source == RunSource.Supervisor &&
-                r.ExternalTaskId == id && r.Attempt == attempt)
+                r.SourceInstance == instance && r.ExternalTaskId == id && r.Attempt == attempt)
                 ?? await db.AgentRuns.SingleOrDefaultAsync(r => r.Source == RunSource.Supervisor &&
-                    r.ExternalTaskId == id && r.Attempt == attempt);
+                    r.SourceInstance == instance && r.ExternalTaskId == id && r.Attempt == attempt);
             if (run is null)
             {
-                run = new AgentRun { ExternalTaskId = id, Attempt = attempt, Source = RunSource.Supervisor };
+                run = new AgentRun { ExternalTaskId = id, SourceInstance = instance, Attempt = attempt, Source = RunSource.Supervisor };
                 db.AgentRuns.Add(run);
             }
 
@@ -167,6 +168,21 @@ public static class SupervisorImport
         entity.Result = result;
         entity.RecordedAt = date ?? entity.RecordedAt;
         return entity.Id;
+    }
+
+    /// <summary>
+    /// Namespace of one Supervisor import. Explicit ?sourceInstance= wins; otherwise the first
+    /// task's repo/worktree is the deterministic namespace, falling back to "supervisor".
+    /// Never use the Draupnir project id: re-creating a project must not change re-import identity.
+    /// </summary>
+    public static string ResolveSourceInstance(JsonElement payload, string? explicitInstance)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitInstance)) return explicitInstance.Trim();
+        var payloadInstance = Text(payload, "sourceInstance");
+        if (!string.IsNullOrWhiteSpace(payloadInstance)) return payloadInstance.Trim();
+        var first = Items(Get(payload, "tasks")).FirstOrDefault();
+        var fromTask = Text(first, "repo") ?? Text(first, "worktree") ?? Text(first, "state");
+        return string.IsNullOrWhiteSpace(fromTask) ? "supervisor" : fromTask.Trim();
     }
 
     public static int Attempt(JsonElement row) =>
