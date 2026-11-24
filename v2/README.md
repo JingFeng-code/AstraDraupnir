@@ -41,11 +41,17 @@ SSO/OIDC is intentionally out of scope and blocked on an external identity provi
 
 `POST /api/projects/{id}/spool-results` accepts a `spool-result/v1` JSON body (`schema`, `command`, `status`, `exitCode`, `findings`, `counts`, optional `affectedTraces`). It stores a `Trace` evidence row named after the command, with the original JSON in `data`; `status=pass` maps to `Pass`, `status=fail` to `Fail`. A SHA-256 of the payload makes re-import idempotent. `GET /api/projects/{id}/spool-results` and the Evidence page show the command, status, counts and affected traces. Invalid schema/status/arrays are `400`.
 
-POST /api/import/supervisor accepts either Supervisor queue.json or delivery state/tasks.json as a JSON body. Pass ?projectId=... to associate the payload with an existing project. Otherwise import matches the task repository to a project or creates a project for it. Reimport updates identified records and preserves human decisions. A reviewer assignment by itself does not produce a verdict.
+POST /api/import/supervisor accepts either Supervisor queue.json or delivery state/tasks.json as a JSON body. Pass ?projectId=... to associate the payload with an existing project, and pass ?sourceInstance=... to name the Supervisor source. The source-instance is the import namespace used together with `Source`, `ExternalTaskId` and `Attempt` for lookups and the unique index. Without the query parameter, the API uses the payload-level `sourceInstance`, then the first task's `repo` (or `worktree`, then `state`), and finally `supervisor`; it never uses the Draupnir project id. The same task id in two source instances is two independent runs; re-importing the same source and attempt updates the existing run (idempotent). Otherwise import matches the task repository to a project or creates a project for it. A reviewer assignment by itself does not produce a verdict. Existing rows were backfilled with their project key (or `legacy` for orphan runs) by the `AddAgentRunSourceInstance` migration.
 
 GET /api/projects/{id}/work-items accepts status, type, sprintId, q, page, and pageSize. It returns items, total, page, and pageSize. DELETE /api/projects/{id} archives the project. The dashboard activeSprintCompletionRate is a percentage from 0 to 100.
 
 POST /api/projects/{id}/reports creates a Markdown report and Stylus DocumentSpec. Fetch them from /api/reports/{id}/markdown and /api/reports/{id}/stylus.yaml. The spec uses JSON syntax, which Stylus accepts as YAML. If the native Stylus executable is on PATH or configured by DRAUPNIR_STYLUS_EXECUTABLE, the API also attempts to render DOCX. Set DRAUPNIR_REPORT_DIR to control where the generated files are written. The default is reports/ under the API process working directory. Markdown and YAML remain available when Stylus is unavailable.
+
+### Human Gate evidence rules
+
+The API is the enforcement point; the Web rules are a readable mirror. A gate linked to a work item evaluates only the **latest attempt of each source** (`Source` + `SourceInstance`) and only **fresh** evidence: an evidence row recorded before the work item's `UpdatedAt` is stale and cannot be the sole basis for approval. `Pass` is required; `Fail` and `ChangesRequested` block direct approval; `Blocked` and `NotTested` are not passes. Older attempts, stale rows and their IDs remain visible in the trace and are listed in the gate snapshot, but do not block a later successful retry. A decision stores `EvidenceSnapshot` (counts, used/latest/stale IDs, latest attempts and whether an exception was used) so it remains auditable after evidence changes.
+
+A linked gate with missing/failed evidence can only be approved with the fixed manual-exception prefix plus a reason of at least 20 characters; it remains Admin-only. A gate with **no work item** is a human judgement, but approval now requires a written reason of at least 20 characters and the reason is written to the `gate.decision` audit row.
 
 ## Tests
 
@@ -55,7 +61,7 @@ dotnet build --no-restore
 dotnet test --no-build --no-restore
 ~~~
 
-Integration tests use WebApplicationFactory and PostgreSQL. The test connection defaults to the local postgres maintenance database at port 55432. DRAUPNIR_TEST_POSTGRES overrides it. The integration test fixture creates, migrates, and removes its own draupnir_test_<guid> database. Current tests: API 32/32, Web 40/40, Playwright 26/26 (desktop 1280 and 390px; delivery flow, V2.1 acceptance and keyboard/a11y); the E2E includes Bug severity, a two-user access check, gate evidence rules and the audit log. Spool evidence is covered by API/Web tests. The V2.1 workspace (Direction D) and the requirement matrix are described in `../docs/v21/ACCEPTANCE.md`. To include actual DOCX rendering in the report test, set DRAUPNIR_TEST_STYLUS_EXECUTABLE to a local Stylus executable.
+Integration tests use WebApplicationFactory and PostgreSQL. The test connection defaults to the local postgres maintenance database at port 55432. DRAUPNIR_TEST_POSTGRES overrides it. The integration test fixture creates, migrates, and removes its own draupnir_test_<guid> database. Current tests: API 36/36, Web 48/48, Playwright 26/26 (desktop 1280 and 390px; delivery flow, V2.1 acceptance and keyboard/a11y); the E2E includes Bug severity, a two-user access check, gate evidence rules and the audit log. Spool evidence is covered by API/Web tests. The V2.1 workspace (Direction D) and the requirement matrix are described in `../docs/v21/ACCEPTANCE.md`. To include actual DOCX rendering in the report test, set DRAUPNIR_TEST_STYLUS_EXECUTABLE to a local Stylus executable.
 
 ## Web（Nuxt 4）
 
@@ -92,8 +98,8 @@ npm run build        # production build (.output)
 `npm run test:e2e` builds the web app, starts the Nuxt server with `NUXT_API_BASE`, and runs Playwright on desktop (1280) and mobile (360). It expects:
 
 - PostgreSQL running on `127.0.0.1:55432` (see “Start PostgreSQL and migrate”).
-- The API running at `http://127.0.0.1:5080` with an administrator configured and a migrated database (use a dedicated database such as `draupnir_e2e`; the E2E run creates projects, a Bug with severity, a second Member, and imports Supervisor data).
-- Required env for the tests: `E2E_ADMIN_PASSWORD` (the administrator password configured for the API under test; nothing is hard-coded in the repo). Optional: `E2E_ADMIN_EMAIL` (default `admin@draupnir.local`), `NUXT_API_BASE`, `E2E_PORT`.
+- The API running at `http://127.0.0.1:5080` with an administrator configured and a migrated database; use a dedicated disposable database such as `draupnir_e2e` or `draupnir_v21_fix2` (the guard refuses the preview). The E2E run creates projects, a Bug with severity, a second Member, and imports Supervisor data.
+- The Playwright global setup is fail-closed: it calls anonymous `GET /api/health`, refuses unless the API reports `status=ok` and `disposable=true`, refuses the shared `draupnir` / `draupnir_v21` / `draupnir_design` databases, refuses a non-loopback API, and refuses without the explicit write opt-in. Run `npx vitest run tests/unit/e2eGuard.test.ts` for the guard proof.
 
 ~~~powershell
 # Example API process for E2E (separate database)
@@ -103,6 +109,11 @@ $env:DRAUPNIR_ADMIN_PASSWORD = '<choose a password for this local instance>'
 dotnet run --project src/Draupnir.Api --no-build --no-restore -- --urls http://127.0.0.1:5080
 
 cd ../web
+$env:E2E_ALLOW_WRITE = '1'
+$env:E2E_STATE_DIR = 'E:\Astra\.cache\tmp\t75-e2e-state'
+$env:E2E_ADMIN_PASSWORD = '<the API administrator password>'
+$env:NUXT_API_BASE = 'http://127.0.0.1:5088'
+$env:E2E_PORT = '4950'
 npm run test:e2e
 ~~~
 
