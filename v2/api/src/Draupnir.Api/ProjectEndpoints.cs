@@ -109,6 +109,7 @@ public static class ProjectEndpoints
             if (await CheckStatus(db, id, status, input.Reason) is { } issue) return issue;
             item.Status = status;
             item.BlockedReason = status == WorkStatus.Blocked ? input.Reason : null;
+            item.UpdatedAt = DateTimeOffset.UtcNow;
             await Access.Audit(db, user.Id, "work_item.status", "work_item", item.Id, $"status={status}");
             await db.SaveChangesAsync();
             await transaction.CommitAsync();
@@ -174,6 +175,7 @@ public static class ProjectEndpoints
                 return Invalid("milestoneId", "Milestone must belong to the project.");
             if (await CheckStatus(db, work.Id, work.Status, work.BlockedReason) is { } issue) return issue;
             if (work.Status != WorkStatus.Blocked) work.BlockedReason = null;
+            work.UpdatedAt = DateTimeOffset.UtcNow;
         }
         if (existing is null) db.Add(input);
         else db.Entry(existing).CurrentValues.SetValues(input);

@@ -30,6 +30,69 @@ public static class GateRules
         if (note is null || !note.StartsWith(ExceptionPrefix, StringComparison.Ordinal)) return false;
         return note[ExceptionPrefix.Length..].Trim().Length >= MinimumExceptionReasonLength;
     }
+
+    /// <summary>沒有工作項目的 Gate 仍需一句可稽核的人工理由（至少 20 字）。</summary>
+    public static bool IsValidManualReason(string? note) =>
+        note?.Trim().Length >= MinimumExceptionReasonLength;
+
+    /// <summary>
+    /// The evidence set that the gate decision actually evaluates.
+    /// Only the latest attempt of each source (Source + SourceInstance) is required;
+    /// evidence older than the work item's last update is stale and cannot be the sole
+    /// basis for approval. Blocked and NotTested are not passes; they only affect the
+    /// "missing pass" condition, while Fail and ChangesRequested block approval.
+    /// </summary>
+    public static GateEvidenceEvaluation Evaluate(WorkItem workItem,
+        IEnumerable<AgentRun> runs, IEnumerable<Evidence> evidence, IEnumerable<Review> reviews)
+    {
+        var latestRuns = runs.Where(r => r.WorkItemId == workItem.Id)
+            .GroupBy(r => new { r.Source, r.SourceInstance })
+            .Select(group => group.OrderByDescending(r => r.Attempt)
+                .ThenByDescending(r => r.StartedAt).First())
+            .ToList();
+        var latestRunIds = latestRuns.Select(r => r.Id).ToHashSet();
+
+        var latestEvidence = evidence.Where(e => e.WorkItemId == workItem.Id &&
+            (e.AgentRunId is null || latestRunIds.Contains(e.AgentRunId.Value))).ToList();
+        var ignoredEvidence = evidence.Where(e => e.WorkItemId == workItem.Id &&
+            e.AgentRunId is not null && !latestRunIds.Contains(e.AgentRunId.Value)).ToList();
+        var staleEvidence = latestEvidence.Where(e => e.RecordedAt < workItem.UpdatedAt).ToList();
+        var usedEvidence = latestEvidence.Where(e => e.RecordedAt >= workItem.UpdatedAt).ToList();
+
+        var latestReviews = reviews.Where(r => r.WorkItemId == workItem.Id &&
+            (r.AgentRunId is null || latestRunIds.Contains(r.AgentRunId.Value))).ToList();
+        var ignoredReviews = reviews.Where(r => r.WorkItemId == workItem.Id &&
+            r.AgentRunId is not null && !latestRunIds.Contains(r.AgentRunId.Value)).ToList();
+
+        return new GateEvidenceEvaluation(latestRuns, latestEvidence, usedEvidence, staleEvidence,
+            ignoredEvidence, latestReviews, ignoredReviews);
+    }
+
+    public sealed class GateEvidenceEvaluation(
+        IReadOnlyList<AgentRun> latestRuns,
+        IReadOnlyList<Evidence> latestEvidence,
+        IReadOnlyList<Evidence> usedEvidence,
+        IReadOnlyList<Evidence> staleEvidence,
+        IReadOnlyList<Evidence> ignoredEvidence,
+        IReadOnlyList<Review> usedReviews,
+        IReadOnlyList<Review> ignoredReviews)
+    {
+        public IReadOnlyList<AgentRun> LatestRuns { get; } = latestRuns;
+        public IReadOnlyList<Evidence> LatestEvidence { get; } = latestEvidence;
+        public IReadOnlyList<Evidence> UsedEvidence { get; } = usedEvidence;
+        public IReadOnlyList<Evidence> StaleEvidence { get; } = staleEvidence;
+        public IReadOnlyList<Evidence> IgnoredEvidence { get; } = ignoredEvidence;
+        public IReadOnlyList<Review> UsedReviews { get; } = usedReviews;
+        public IReadOnlyList<Review> IgnoredReviews { get; } = ignoredReviews;
+        public bool HasPass => UsedEvidence.Any(e => e.Result == EvidenceResult.Pass);
+        public bool HasFail => UsedEvidence.Any(e => e.Result == EvidenceResult.Fail);
+        public bool ChangesRequested => UsedReviews.Any(r => r.Verdict == Verdict.ChangesRequested);
+        public bool NeedsException => !HasPass || HasFail || ChangesRequested;
+        public Dictionary<EvidenceResult, int> UsedCounts => Enum.GetValues<EvidenceResult>()
+            .ToDictionary(result => result, result => UsedEvidence.Count(e => e.Result == result));
+        public Dictionary<EvidenceResult, int> LatestCounts => Enum.GetValues<EvidenceResult>()
+            .ToDictionary(result => result, result => LatestEvidence.Count(e => e.Result == result));
+    }
 }
 
 public static class ApiRules

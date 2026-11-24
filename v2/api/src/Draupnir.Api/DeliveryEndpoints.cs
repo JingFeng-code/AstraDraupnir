@@ -40,20 +40,51 @@ public static class DeliveryEndpoints
             if (input.Approved is not { } approved) return Invalid("approved", "A decision is required.");
             if (await db.Gates.FindAsync(id) is not { } gate) return Missing();
             if (gate.Status != GateStatus.Pending) return Conflict("This gate already has a human decision.");
-            if (approved && gate.WorkItemId is { } workItemId)
+            GateRules.GateEvidenceEvaluation? evaluation = null;
+            WorkItem? workItem = null;
+            if (gate.WorkItemId is { } workItemId)
             {
+                workItem = await db.WorkItems.FindAsync(workItemId);
+                if (workItem is null) return Missing();
+                var runs = await db.AgentRuns.Where(r => r.WorkItemId == workItemId).ToListAsync();
+                var evidence = await db.Evidence.Where(e => e.WorkItemId == workItemId).ToListAsync();
+                var reviews = await db.Reviews.Where(r => r.WorkItemId == workItemId).ToListAsync();
+                evaluation = GateRules.Evaluate(workItem, runs, evidence, reviews);
                 // 前端 app/lib/evidenceRules.ts 的規則必須在後端再驗一次，
-                // 否則直接呼叫這個端點就能跳過必要證據。沒有對應工作項目的 Gate 仍屬人工判斷。
-                var results = await db.Evidence.Where(e => e.WorkItemId == workItemId).Select(e => e.Result).ToListAsync();
-                var verdicts = await db.Reviews.Where(r => r.WorkItemId == workItemId).Select(r => r.Verdict).ToListAsync();
-                if (GateRules.NeedsException(results, verdicts) && !GateRules.IsValidExceptionNote(input.Note))
+                // 否則直接呼叫這個端點就能跳過必要證據。
+                if (approved && evaluation.NeedsException && !GateRules.IsValidExceptionNote(input.Note))
                     return Invalid("note", "必要證據未齊全：核准必須使用人工例外，並寫明至少 20 字的理由。");
             }
+            if (approved && gate.WorkItemId is null && !GateRules.IsValidManualReason(input.Note))
+                return Invalid("note", "沒有對應工作項目的 Gate 仍需寫明至少 20 字的人工判斷理由。");
+
             gate.Status = approved ? GateStatus.Approved : GateStatus.Rejected;
             gate.DecidedBy = user.Id;
             gate.DecidedAt = DateTimeOffset.UtcNow;
             gate.Note = input.Note;
-            await Access.Audit(db, user.Id, "gate.decision", "gate", gate.Id, $"{gate.Status}; project={gate.ProjectId}");
+            gate.EvidenceSnapshot = JsonSerializer.SerializeToElement(new
+            {
+                evaluatedAt = gate.DecidedAt,
+                workItemId = gate.WorkItemId,
+                workItemUpdatedAt = workItem?.UpdatedAt,
+                rule = "latest attempt per Source+SourceInstance; fresh evidence only; Pass required; Fail/ChangesRequested block; Blocked/NotTested are not passes",
+                latestAttempts = evaluation?.LatestRuns.Select(r => new
+                {
+                    runId = r.Id, source = r.Source.ToString(), sourceInstance = r.SourceInstance, attempt = r.Attempt
+                }),
+                counts = (evaluation?.UsedCounts ?? new Dictionary<EvidenceResult, int>())
+                    .ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
+                usedEvidenceIds = evaluation?.UsedEvidence.Select(e => e.Id),
+                usedReviewIds = evaluation?.UsedReviews.Select(r => r.Id),
+                staleEvidenceIds = evaluation?.StaleEvidence.Select(e => e.Id),
+                ignoredEvidenceIds = evaluation?.IgnoredEvidence.Select(e => e.Id),
+                ignoredReviewIds = evaluation?.IgnoredReviews.Select(r => r.Id),
+                exceptionUsed = approved && evaluation?.NeedsException == true,
+                manualReason = gate.WorkItemId is null ? input.Note : null
+            });
+            var auditDetail = $"{gate.Status}; project={gate.ProjectId}";
+            if (gate.WorkItemId is null && approved) auditDetail += $"; reason={input.Note!.Trim()}";
+            await Access.Audit(db, user.Id, "gate.decision", "gate", gate.Id, auditDetail);
             await db.SaveChangesAsync();
             return Results.Ok(gate);
         });
@@ -99,12 +130,12 @@ public static class DeliveryEndpoints
                 .OrderByDescending(e => e.CreatedAt).ToListAsync());
         });
 
-        api.MapPost("/import/supervisor", async (JsonElement payload, Guid? projectId, ClaimsPrincipal principal, DraupnirDb db) =>
+        api.MapPost("/import/supervisor", async (JsonElement payload, Guid? projectId, string? sourceInstance, ClaimsPrincipal principal, DraupnirDb db) =>
         {
             if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
             if (!Access.IsAdmin(user)) return Access.Forbidden();
             if (projectId is { } selected && !await Access.CanProject(db, user, selected)) return Access.Forbidden();
-            return await SupervisorImport.Import(payload, projectId, db, user.Id);
+            return await SupervisorImport.Import(payload, projectId, db, user.Id, sourceInstance);
         });
 
         api.MapGet("/dashboard", async (Guid? projectId, ClaimsPrincipal principal, DraupnirDb db) =>
