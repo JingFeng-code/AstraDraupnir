@@ -121,6 +121,9 @@ namespace Draupnir.Api.Migrations
                     b.Property<Guid?>("AgentRunId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Data")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("ImportKey")
                         .HasColumnType("text");
 
@@ -130,11 +133,17 @@ namespace Draupnir.Api.Migrations
                     b.Property<string>("Path")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("RecordedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Result")
                         .HasColumnType("integer");
+
+                    b.Property<string>("SpoolResultHash")
+                        .HasColumnType("text");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -152,6 +161,10 @@ namespace Draupnir.Api.Migrations
 
                     b.HasIndex("AgentRunId", "ImportKey")
                         .IsUnique();
+
+                    b.HasIndex("ProjectId", "SpoolResultHash")
+                        .IsUnique()
+                        .HasFilter("\"SpoolResultHash\" IS NOT NULL");
 
                     b.ToTable("Evidence");
                 });
@@ -527,6 +540,11 @@ namespace Draupnir.Api.Migrations
                     b.HasOne("Draupnir.Api.AgentRun", null)
                         .WithMany()
                         .HasForeignKey("AgentRunId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Draupnir.Api.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Draupnir.Api.WorkItem", null)

@@ -103,6 +103,7 @@ export interface AgentRun {
 
 export interface Evidence {
   id: string
+  projectId: string | null
   workItemId: string | null
   agentRunId: string | null
   kind: EvidenceKind
@@ -111,6 +112,8 @@ export interface Evidence {
   url: string | null
   result: EvidenceResult
   recordedAt: string
+  spoolResultHash: string | null
+  data: string | null
 }
 
 export interface Review {

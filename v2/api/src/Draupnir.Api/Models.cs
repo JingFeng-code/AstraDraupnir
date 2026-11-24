@@ -124,6 +124,7 @@ public sealed class AgentRun
 public sealed class Evidence
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? ProjectId { get; set; }
     public Guid? WorkItemId { get; set; }
     public Guid? AgentRunId { get; set; }
     public EvidenceKind Kind { get; set; }
@@ -133,6 +134,8 @@ public sealed class Evidence
     public EvidenceResult Result { get; set; }
     public DateTimeOffset RecordedAt { get; set; } = DateTimeOffset.UtcNow;
     public string? ImportKey { get; set; }
+    public string? SpoolResultHash { get; set; }
+    public string? Data { get; set; }
 }
 
 public sealed class Review
@@ -195,6 +198,9 @@ public sealed class DraupnirDb(DbContextOptions<DraupnirDb> options) : DbContext
         model.Entity<Sprint>().HasIndex(x => x.ProjectId).IsUnique().HasFilter("\"Status\" = 1");
         model.Entity<AgentRun>().HasIndex(x => new { x.Source, x.ExternalTaskId, x.Attempt }).IsUnique();
         model.Entity<Evidence>().HasIndex(x => new { x.AgentRunId, x.ImportKey }).IsUnique();
+        model.Entity<Evidence>().HasIndex(x => new { x.ProjectId, x.SpoolResultHash }).IsUnique()
+            .HasFilter("\"SpoolResultHash\" IS NOT NULL");
+        model.Entity<Evidence>().Property(x => x.Data).HasColumnType("jsonb");
         model.Entity<Review>().HasIndex(x => new { x.AgentRunId, x.ImportKey }).IsUnique();
         model.Entity<Review>().Property(x => x.Findings).HasColumnType("jsonb");
         model.Entity<HumanGate>().HasIndex(x => new { x.ProjectId, x.ExternalRef }).IsUnique();
@@ -210,6 +216,7 @@ public sealed class DraupnirDb(DbContextOptions<DraupnirDb> options) : DbContext
         model.Entity<WorkItem>().HasOne<Milestone>().WithMany().HasForeignKey(x => x.MilestoneId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<WorkItemDependency>().HasOne<WorkItem>().WithMany().HasForeignKey(x => x.WorkItemId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<WorkItemDependency>().HasOne<WorkItem>().WithMany().HasForeignKey(x => x.DependsOnId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<Evidence>().HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         foreach (var type in new[] { typeof(AgentRun), typeof(Evidence), typeof(Review), typeof(HumanGate) })
             model.Entity(type).HasOne(typeof(WorkItem)).WithMany().HasForeignKey("WorkItemId").OnDelete(DeleteBehavior.Restrict);
         model.Entity<Evidence>().HasOne<AgentRun>().WithMany().HasForeignKey(x => x.AgentRunId).OnDelete(DeleteBehavior.Restrict);

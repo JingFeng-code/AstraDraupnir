@@ -3,6 +3,7 @@ import type { Evidence, Review } from '~/types/api'
 import { toApiError, type ApiError } from '~/utils/errors'
 import { formatDateTime } from '~/utils/format'
 import { evidenceKindLabels, evidenceResultLabels, verdictLabels } from '~/utils/labels'
+import { parseSpoolEvidence } from '~/utils/spoolEvidence'
 
 const route = useRoute()
 const api = useApi()
@@ -10,6 +11,10 @@ const id = computed(() => String(route.params.id))
 
 const evidence = ref<Evidence[]>([])
 const reviews = ref<Review[]>([])
+const traceEvidence = computed(() => evidence.value
+  .filter(item => item.kind === 'Trace')
+  .map(item => ({ item, trace: parseSpoolEvidence(item.data) }))
+  .filter(({ trace }) => trace !== null))
 const loading = ref(true)
 const error = ref<ApiError | null>(null)
 
@@ -44,6 +49,33 @@ watch(id, load, { immediate: true })
     <AppLoading v-if="loading" />
     <AppNotice v-else-if="error" class="mt-4" :message="error.detail" />
     <div v-else class="space-y-8">
+      <section v-if="traceEvidence.length" aria-labelledby="trace-evidence-title">
+        <h3 id="trace-evidence-title" class="mt-6 text-lg font-bold text-ink">Trace evidence（Spool）</h3>
+        <div class="table-wrap panel mt-3">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-surface-muted text-xs text-ink-subtle">
+              <tr>
+                <th class="px-4 py-2 font-medium">Command</th>
+                <th class="px-4 py-2 font-medium">Status</th>
+                <th class="px-4 py-2 font-medium">Counts</th>
+                <th class="px-4 py-2 font-medium">Affected traces</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="{ item, trace } in traceEvidence" :key="item.id" class="border-t border-line align-top" :data-testid="`trace-evidence-${item.id}`">
+                <td class="px-4 py-2 font-mono text-xs">{{ trace!.command }}</td>
+                <td class="px-4 py-2"><StatusBadge :value="evidenceResultLabels[item.result]" /></td>
+                <td class="px-4 py-2 font-mono text-xs text-ink-muted">{{ JSON.stringify(trace!.counts) }}</td>
+                <td class="px-4 py-2 text-xs text-ink-muted">
+                  <p v-if="!trace!.affectedTraces.length">—</p>
+                  <p v-for="affected in trace!.affectedTraces" :key="affected.featureId">{{ affected.featureName }}（{{ affected.featureId }}）</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section aria-labelledby="evidence-title">
         <h3 id="evidence-title" class="mt-6 text-lg font-bold text-ink">證據</h3>
         <AppEmpty v-if="!evidence.length" class="mt-3" title="還沒有證據" description="匯入包含 evidence 的 Supervisor 資料後會顯示在這裡。" />

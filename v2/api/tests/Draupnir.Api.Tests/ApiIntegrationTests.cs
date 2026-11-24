@@ -123,6 +123,42 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
     }
 
     [Fact]
+    public async Task SpoolResultsAreValidatedStoredAndIdempotent()
+    {
+        using var client = await AuthorizedClient();
+        var project = await NewProject(client, "SPOOL");
+        var route = $"/api/projects/{project}/spool-results";
+        var check = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Fixtures", "spool-check.json"));
+        var impact = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Fixtures", "spool-impact.json"));
+
+        var first = await Json(await client.PostAsync(route, new StringContent(check, Encoding.UTF8, "application/json")));
+        Assert.True(first.GetProperty("imported").GetBoolean());
+        var id = first.GetProperty("evidenceId").GetGuid();
+        var duplicate = await Json(await client.PostAsync(route, new StringContent(check, Encoding.UTF8, "application/json")));
+        Assert.False(duplicate.GetProperty("imported").GetBoolean());
+        Assert.Equal(id, duplicate.GetProperty("evidenceId").GetGuid());
+
+        var impactResult = await Json(await client.PostAsync(route, new StringContent(impact, Encoding.UTF8, "application/json")));
+        Assert.True(impactResult.GetProperty("imported").GetBoolean());
+        var stored = await Json(await client.GetAsync(route));
+        Assert.Equal(2, stored.GetArrayLength());
+        var checkRow = stored.EnumerateArray().Single(x => x.GetProperty("title").GetString() == "check");
+        Assert.Equal("Trace", checkRow.GetProperty("kind").GetString());
+        Assert.Equal("Pass", checkRow.GetProperty("result").GetString());
+        var checkData = JsonDocument.Parse(checkRow.GetProperty("data").GetString()!).RootElement;
+        Assert.Equal("pass", checkData.GetProperty("status").GetString());
+        var impactRow = stored.EnumerateArray().Single(x => x.GetProperty("title").GetString() == "impact");
+        var impactData = JsonDocument.Parse(impactRow.GetProperty("data").GetString()!).RootElement;
+        Assert.Equal("sandbox-arithmetic", impactData.GetProperty("affectedTraces")[0].GetProperty("featureId").GetString());
+
+        var evidence = await Json(await client.GetAsync($"/api/evidence?projectId={project}"));
+        Assert.Contains(evidence.EnumerateArray(), item => item.GetProperty("id").GetGuid() == id);
+        var invalid = await client.PostAsync(route,
+            new StringContent("{\"schema\":\"spool-result/v1\"}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
+    [Fact]
     public async Task SingleActiveSprintAndMilestoneAssociationsAreEnforced()
     {
         using var client = await AuthorizedClient();

@@ -1,0 +1,16 @@
+{
+  "schema": "spool-result/v1",
+  "command": "check",
+  "status": "pass",
+  "exitCode": 0,
+  "findings": [],
+  "artifacts": [],
+  "counts": {
+    "layers": 2,
+    "nodes": 3,
+    "edges": 2,
+    "errors": 0,
+    "warnings": 0,
+    "infos": 0
+  }
+}

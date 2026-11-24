@@ -47,7 +47,8 @@ public static class DeliveryEndpoints
         api.MapGet("/evidence", async (Guid? projectId, Guid? workItemId, DraupnirDb db) =>
             await db.Evidence.Where(e => (!workItemId.HasValue || e.WorkItemId == workItemId ||
                 db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.WorkItemId == workItemId)) &&
-                (!projectId.HasValue || db.WorkItems.Any(w => w.Id == e.WorkItemId && w.ProjectId == projectId) ||
+                (!projectId.HasValue || e.ProjectId == projectId ||
+                db.WorkItems.Any(w => w.Id == e.WorkItemId && w.ProjectId == projectId) ||
                 db.AgentRuns.Any(r => r.Id == e.AgentRunId && r.ProjectId == projectId)))
                 .OrderByDescending(e => e.RecordedAt).ToListAsync());
         api.MapGet("/reviews", async (Guid? projectId, Guid? workItemId, DraupnirDb db) =>
@@ -110,7 +111,8 @@ public static class DeliveryEndpoints
             ("Blocked work", Lines(data.BlockedItems.Select(x => $"{x.Code} {x.Title}: {x.BlockedReason}"))),
             ("Pending human gates", Lines(data.PendingGates.Select(x => x.Title))),
             ("Recent agent runs", Lines(data.RecentAgentRuns.Select(x => $"{x.ExternalTaskId} · {x.Agent} · {x.Status}"))),
-            ("Evidence", Lines(await db.Evidence.Where(e => db.WorkItems.Any(w => w.Id == e.WorkItemId && w.ProjectId == projectId)
+            ("Evidence", Lines(await db.Evidence.Where(e => e.ProjectId == projectId
+                || db.WorkItems.Any(w => w.Id == e.WorkItemId && w.ProjectId == projectId)
                 || Runs(db, projectId, null).Any(r => r.Id == e.AgentRunId)).OrderByDescending(e => e.RecordedAt).Take(30)
                 .Select(e => e.Title + " · " + (e.Path ?? e.Url ?? "")).ToListAsync())),
             ("Reviews", Lines((await db.Reviews.Where(e => db.WorkItems.Any(w => w.Id == e.WorkItemId && w.ProjectId == projectId)
