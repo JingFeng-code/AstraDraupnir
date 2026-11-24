@@ -97,6 +97,7 @@ public sealed class WorkItem : IProjectChild
     public DateOnly? DueDate { get; set; }
     public string? Severity { get; set; }
     public string? BlockedReason { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class WorkItemDependency
@@ -131,6 +132,7 @@ public sealed class AgentRun
     public Guid? ProjectId { get; set; }
     public Guid? WorkItemId { get; set; }
     public string ExternalTaskId { get; set; } = "";
+    public string SourceInstance { get; set; } = "supervisor";
     public string Agent { get; set; } = "";
     public string Model { get; set; } = "";
     public string? SessionId { get; set; }
@@ -181,6 +183,8 @@ public sealed class HumanGate : IProjectChild
     public Guid? DecidedBy { get; set; }
     public DateTimeOffset? DecidedAt { get; set; }
     public string? Note { get; set; }
+    /// <summary>JSON evidence evaluation frozen at decision time; null for legacy gates.</summary>
+    public System.Text.Json.JsonElement? EvidenceSnapshot { get; set; }
 }
 
 public sealed class DeliveryReport : IProjectChild
@@ -221,7 +225,7 @@ public sealed class DraupnirDb(DbContextOptions<DraupnirDb> options) : DbContext
         model.Entity<Requirement>().HasIndex(x => new { x.ProjectId, x.Code }).IsUnique();
         model.Entity<WorkItem>().HasIndex(x => new { x.ProjectId, x.Code }).IsUnique();
         model.Entity<Sprint>().HasIndex(x => x.ProjectId).IsUnique().HasFilter("\"Status\" = 1");
-        model.Entity<AgentRun>().HasIndex(x => new { x.Source, x.ExternalTaskId, x.Attempt }).IsUnique();
+        model.Entity<AgentRun>().HasIndex(x => new { x.Source, x.SourceInstance, x.ExternalTaskId, x.Attempt }).IsUnique();
         model.Entity<Evidence>().HasIndex(x => new { x.AgentRunId, x.ImportKey }).IsUnique();
         model.Entity<Evidence>().HasIndex(x => new { x.ProjectId, x.SpoolResultHash }).IsUnique()
             .HasFilter("\"SpoolResultHash\" IS NOT NULL");
