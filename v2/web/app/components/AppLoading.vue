@@ -7,8 +7,14 @@ withDefaults(defineProps<{
 </script>
 
 <template>
-  <p class="flex items-center gap-2 py-6 text-sm text-ink-muted" role="status">
-    <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-line border-t-navy-700" aria-hidden="true"></span>
-    {{ label }}
-  </p>
+  <div class="ui-panel ui-loading" role="status">
+    <span class="ui-loading-mark" aria-hidden="true"></span>
+    <span>{{ label }}</span>
+  </div>
 </template>
+
+<style scoped>
+.ui-loading { display: flex; align-items: center; gap: 12px; padding: 20px 22px; color: var(--c-ink-2); font-size: 15px; }
+.ui-loading-mark { width: 16px; height: 16px; flex: none; border-radius: 50%; border: 2px solid var(--c-line-strong); border-top-color: var(--c-brand); animation: ui-spin 900ms linear infinite; }
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+</style>

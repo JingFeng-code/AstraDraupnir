@@ -7,23 +7,27 @@ withDefaults(defineProps<{
   tone: 'error',
   details: () => [],
 })
-
-const toneClass = {
-  error: 'border-[#c98a8a] bg-[#fdf1f1] text-[#7a1d1d]',
-  success: 'border-[#9dc3a6] bg-[#eef7f0] text-[#1e4d2b]',
-  info: 'border-line bg-surface-muted text-ink-muted',
-}
 </script>
 
 <template>
   <div
-    class="rounded-xl border px-4 py-3 text-sm"
-    :class="toneClass[tone]"
+    class="ui-callout ui-notice"
+    :class="`is-${tone}`"
     :role="tone === 'error' ? 'alert' : 'status'"
   >
-    <p class="font-medium">{{ message }}</p>
-    <ul v-if="details.length" class="mt-1 list-disc pl-5">
+    <p class="ui-notice-message">{{ message }}</p>
+    <ul v-if="details.length" class="ui-notice-details">
       <li v-for="detail in details" :key="detail">{{ detail }}</li>
     </ul>
+    <div v-if="$slots.default"><slot /></div>
   </div>
 </template>
+
+<style scoped>
+.ui-notice { padding: 16px 18px; gap: 8px; }
+.ui-notice.is-error { background: var(--c-fault-bg); box-shadow: inset 4px 0 0 var(--c-fault); color: var(--c-ink); }
+.ui-notice.is-success { background: var(--c-fix-bg); box-shadow: inset 4px 0 0 var(--c-fix); color: var(--c-ink); }
+.ui-notice.is-info { background: var(--c-sunken); box-shadow: inset 4px 0 0 var(--c-line-strong); color: var(--c-ink); }
+.ui-notice-message { font-size: 16px; font-weight: 600; }
+.ui-notice-details { margin-left: 18px; list-style: disc; font-size: 14px; color: var(--c-ink-2); }
+</style>

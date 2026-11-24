@@ -30,6 +30,23 @@ describe('ConfirmDialog', () => {
     expect(dialog.text()).toContain('决定会立刻生效。')
   })
 
+  it('開啟時聚焦第一個按鈕，關閉後把焦點還給原控制項', async () => {
+    const opener = document.createElement('button')
+    document.body.appendChild(opener)
+    opener.focus()
+    try {
+      const wrapper = await mountSuspended(ConfirmDialog, { props: { open: false, title: '焦點測試' } })
+      await wrapper.setProps({ open: true })
+      await nextTick()
+      expect(document.activeElement?.tagName).toBe('BUTTON')
+      await wrapper.setProps({ open: false })
+      await nextTick()
+      expect(document.activeElement).toBe(opener)
+    } finally {
+      opener.remove()
+    }
+  })
+
   it('取消與確認會發出事件，busy 時按鈕停用', async () => {
     const wrapper = await mountSuspended(ConfirmDialog, {
       props: { open: true, title: '示範', busy: true },

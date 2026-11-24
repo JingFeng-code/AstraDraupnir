@@ -8,5 +8,6 @@ describe('StatusBadge', () => {
     const wrapper = await mountSuspended(StatusBadge, { props: { value: workStatusLabels.Done } })
     expect(wrapper.text()).toBe('完成')
     expect(wrapper.classes()).toContain('bg-[#e6f0e7]')
+    expect(wrapper.find('.um-idle').exists()).toBe(true)
   })
 })
