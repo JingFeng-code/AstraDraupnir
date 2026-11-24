@@ -112,7 +112,7 @@ export function useWorkspace() {
     busy.value = true
     try {
       await $fetch(`/api/gates/${gate.id}/decision`, { method: 'POST', credentials: 'include', body: { approved, note } })
-      toast.value = approved ? '已核准' : '已駁回'
+      toast.value = approved ? '已核准（只記錄在 Draupnir，未同步到 Supervisor）' : '已駁回（只記錄在 Draupnir，未同步到 Supervisor）'
       await load(true)
     } catch (e: unknown) {
       toast.value = (e as { data?: { detail?: string } })?.data?.detail ?? '無法送出決定'
