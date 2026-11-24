@@ -1,0 +1,83 @@
+/* Draupnir design lab: tokens shared by the three directions. Retune colors here only. */
+@import '@fontsource-variable/atkinson-hyperlegible-next';
+@import '@fontsource-variable/noto-sans-tc';
+
+html[data-lab] {
+  --f-sans: 'Atkinson Hyperlegible Next Variable', 'Noto Sans TC Variable', 'Microsoft JhengHei UI', system-ui, sans-serif;
+  --f-code: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --s-13: 13px; --s-15: 15px; --s-17: 17px; --s-21: 21px; --s-28: 28px;
+  --r-1: 3px; --r-2: 8px;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+
+  /* light: mineral grays, slate ink */
+  --bg: #edf0f4; --surface: #f7f8fa; --raised: #ffffff; --sunken: #e3e8ee;
+  --ink: #18212b; --ink-2: #4a5666; --ink-3: #5c6877;
+  --line: #d5dbe3; --line-strong: #b4bdc9;
+  --fix: #17695b; --fix-bg: #ddefea;      /* proven */
+  --need: #9a5300; --need-bg: #f7e9d3;    /* needs the owner */
+  --move: #2b55c7; --move-bg: #e1e8fa;    /* an agent is working */
+  --fault: #ad3327; --fault-bg: #f8e0dd;  /* failed or blocked */
+  --idle: #5c6877; --idle-bg: #e3e8ee;    /* waiting, not started */
+  --focus: #2b55c7;
+  color-scheme: light;
+}
+
+html[data-lab][data-theme='dark'] {
+  --bg: #0f151c; --surface: #151d26; --raised: #1b2530; --sunken: #0b1117;
+  --ink: #e4eaf1; --ink-2: #a9b5c3; --ink-3: #8b97a7;
+  --line: #243140; --line-strong: #364960;
+  --fix: #5cc5ae; --fix-bg: #12342e;
+  --need: #f0b35a; --need-bg: #3a2a10;
+  --move: #86a8ff; --move-bg: #18284f;
+  --fault: #f4877b; --fault-bg: #41201c;
+  --idle: #9aa7b7; --idle-bg: #1f2a36;
+  --focus: #86a8ff;
+  color-scheme: dark;
+}
+
+html[data-lab] body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-sans);
+  font-size: var(--s-15);
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+:where(html[data-lab]) :where(h1, h2, h3, h4, p, ul, ol, dl, dd, figure) { margin: 0; }
+:where(html[data-lab]) :where(ul, ol) { padding: 0; list-style: none; }
+html[data-lab] a { color: inherit; text-decoration: none; }
+:where(html[data-lab]) button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+:where(html[data-lab]) :where(a, button, select, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-1);
+}
+html[data-lab] .lab-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+html[data-lab] .lab-code { font-family: var(--f-code); font-size: .88em; }
+html[data-lab] .lab-muted { color: var(--ink-2); }
+html[data-lab] .lab-faint { color: var(--ink-3); }
+html[data-lab] .lab-num { font-variant-numeric: tabular-nums; }
+
+/* shared controls: one button language for all three directions */
+html[data-lab] .lab-btn {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-1); background: var(--raised);
+  font-weight: 500; transition: background .12s var(--ease), border-color .12s var(--ease);
+}
+html[data-lab] .lab-btn:hover { border-color: var(--ink-3); }
+html[data-lab] .lab-btn[disabled] { opacity: .5; cursor: not-allowed; }
+html[data-lab] .lab-btn.is-primary { background: var(--fix); border-color: var(--fix); color: var(--bg); }
+html[data-lab][data-theme='dark'] .lab-btn.is-primary { color: #06201a; }
+html[data-lab] .lab-btn.is-danger { color: var(--fault); border-color: var(--fault); }
+html[data-lab] .lab-field {
+  min-height: 34px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--r-1);
+  background: var(--raised); color: var(--ink); font: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-lab] * { transition: none !important; animation: none !important; }
+}
+
+/* inline text links and button-styled links, shared by directions B and C */
+html[data-lab] .lab-link { all: unset; cursor: pointer; color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+html[data-lab] .lab-link:hover { text-decoration-color: var(--ink); }
+html[data-lab] .lab-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
