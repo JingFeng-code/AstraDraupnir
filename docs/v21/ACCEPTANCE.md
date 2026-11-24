@@ -47,7 +47,7 @@ npm ci; npm run dev -- --host 127.0.0.1 --port 3201
 
 - 只有兩種角色（`Admin`、`Member`），沒有 Viewer；SSO/OIDC 明確不在本輪（ADR-006）。
 - 伺服器端每次都查 DB 的 `IsActive` 與角色，停用或降階後舊 cookie 立即失效；最後一個 active admin 不能被停用或降級。
-- Cookie：`HttpOnly`、`SameSite=Strict`、`SecurePolicy=SameAsRequest`（本機 HTTP）。**已知限制**：沒有 security stamp、沒有絕對到期時間，改密碼後舊 session 不會立刻失效（列入 §10 backlog）。
+- Cookie：`HttpOnly`、`SameSite=Strict`、`SecurePolicy=SameAsRequest`（本機 HTTP；正式環境改 `Always`，見 §5.1 安全政策）。**Session**：8 小時絕對期限、`SlidingExpiration=false`；`SecurityStamp` 是 cookie claim，改密碼／角色／啟用狀態會立即撤銷舊 session（本輪新增，見 §8）。登入失敗 5 次／10 分鐘 → 429。
 
 ## 3. 驗收矩陣（A：產品功能）
 

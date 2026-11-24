@@ -22,7 +22,10 @@ public static class SupervisorImport
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         var projects = await db.Projects.ToListAsync();
         if (projectId is not null && !projects.Any(p => p.Id == projectId)) return Missing();
-        var instance = ResolveSourceInstance(payload, sourceInstance);
+        // 以專案頁匯入（有 projectId）時，命名空間固定用該專案的 Key：這與 migration 的 legacy backfill 一致，
+        // 升級後第一次重匯才不會對不上舊資料列。沒有 projectId 的 repo 比對路徑才用 payload 的 repo/worktree。
+        var selectedKey = projectId is { } selectedId ? projects.First(project => project.Id == selectedId).Key : null;
+        var instance = ResolveSourceInstance(payload, sourceInstance, selectedKey);
         var agents = Get(payload, "agents");
         var seenRuns = new HashSet<Guid>();
         var seenEvidence = new HashSet<Guid>();
@@ -175,11 +178,12 @@ public static class SupervisorImport
     /// task's repo/worktree is the deterministic namespace, falling back to "supervisor".
     /// Never use the Draupnir project id: re-creating a project must not change re-import identity.
     /// </summary>
-    public static string ResolveSourceInstance(JsonElement payload, string? explicitInstance)
+    public static string ResolveSourceInstance(JsonElement payload, string? explicitInstance, string? selectedProjectKey = null)
     {
         if (!string.IsNullOrWhiteSpace(explicitInstance)) return explicitInstance.Trim();
         var payloadInstance = Text(payload, "sourceInstance");
         if (!string.IsNullOrWhiteSpace(payloadInstance)) return payloadInstance.Trim();
+        if (!string.IsNullOrWhiteSpace(selectedProjectKey)) return selectedProjectKey.Trim();
         var first = Items(Get(payload, "tasks")).FirstOrDefault();
         var fromTask = Text(first, "repo") ?? Text(first, "worktree") ?? Text(first, "state");
         return string.IsNullOrWhiteSpace(fromTask) ? "supervisor" : fromTask.Trim();
