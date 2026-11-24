@@ -40,3 +40,5 @@ testem.log
 # System files
 .DS_Store
 Thumbs.db
+# stray MSBuild output (bad -p:BaseOutputPath value)
+[Aa]stra.cache*
