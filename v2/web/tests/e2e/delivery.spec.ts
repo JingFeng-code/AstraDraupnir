@@ -19,6 +19,12 @@ function uniqueKey(): string {
   return Array.from({ length: 6 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('')
 }
 
+async function openMainNav(page: Page, name: string) {
+  const menu = page.getByRole('button', { name: '選單', exact: true })
+  if (await menu.isVisible() && await menu.getAttribute('aria-expanded') === 'false') await menu.click()
+  await page.getByRole('navigation', { name: '主要' }).getByRole('link', { name, exact: true }).click()
+}
+
 async function assertNoHorizontalScroll(page: Page, label: string, width = 360) {
   await page.setViewportSize({ width, height: 800 })
   await page.waitForLoadState('networkidle')
@@ -52,7 +58,10 @@ test.describe('Draupnir V2 交付流程（真實 API + PostgreSQL）', () => {
     await page.getByTestId('login-email').fill(email)
     await page.getByTestId('login-password').fill(password)
     await page.getByTestId('login-submit').click()
-    await expect(page).toHaveURL(/\/projects$/)
+    await expect(page).toHaveURL('/')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('工程工作空間')
+    await openMainNav(page, '專案')
+    await expect(page).toHaveURL('/projects')
 
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('專案')
     if (!isMobile) await page.screenshot({ path: shots('01-projects'), fullPage: true })
@@ -128,7 +137,7 @@ test.describe('Draupnir V2 交付流程（真實 API + PostgreSQL）', () => {
     await expect(page.getByTestId('import-result')).toContainText('Gate 1')
 
     // 9. Agent 執行可見
-    await page.getByRole('link', { name: 'Agent 執行', exact: true }).click()
+    await page.getByRole('navigation', { name: '專案導覽' }).getByRole('link', { name: 'Agent 執行', exact: true }).click()
     await expect(page.locator('table')).toContainText('EXAMPLE-01')
 
     // 10. 批准 Human Gate（需確認對話框）
@@ -158,20 +167,20 @@ test.describe('Draupnir V2 交付流程（真實 API + PostgreSQL）', () => {
     await assertNoHorizontalScroll(page, '交付報告')
 
     // 12. Dashboard 截圖（回到總覽）
-    await page.getByRole('link', { name: '總覽', exact: true }).click()
+    await page.getByRole('navigation', { name: '專案導覽' }).getByRole('link', { name: '總覽', exact: true }).click()
     await expect(page.getByTestId('dashboard-count-Done')).toBeVisible()
     if (!isMobile) await page.screenshot({ path: shots('02-dashboard'), fullPage: true })
     await assertAxeClean(page, 'Dashboard')
     await assertNoHorizontalScroll(page, 'Dashboard')
 
     // 13. 重新登入狀態：回首頁仍能看到專案卡
-    await page.getByRole('link', { name: '專案', exact: true }).click()
+    await openMainNav(page, '專案')
     await expect(page.getByTestId(`project-card-${key}`)).toBeVisible()
 
     // 14. Admin creates a Member; that Member must not see the admin's project.
     const memberEmail = `e2e-member-${key.toLowerCase()}@example.test`
     const memberPassword = 'Member!2026'
-    await page.getByRole('link', { name: '使用者', exact: true }).click()
+    await openMainNav(page, '使用者與權限')
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('使用者')
     await page.getByTestId('user-email').fill(memberEmail)
     await page.getByTestId('user-display-name').fill('E2E Member')
@@ -183,7 +192,10 @@ test.describe('Draupnir V2 交付流程（真實 API + PostgreSQL）', () => {
     await page.getByTestId('login-email').fill(memberEmail)
     await page.getByTestId('login-password').fill(memberPassword)
     await page.getByTestId('login-submit').click()
-    await expect(page).toHaveURL(/\/projects$/)
+    await expect(page).toHaveURL('/')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('工程工作空間')
+    await openMainNav(page, '專案')
+    await expect(page).toHaveURL('/projects')
     await expect(page.getByTestId(`project-card-${key}`)).toHaveCount(0)
 
     await testInfo.attach('e2e-summary', {

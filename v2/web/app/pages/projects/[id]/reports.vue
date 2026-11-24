@@ -76,7 +76,7 @@ watch(id, load, { immediate: true })
       </section>
       <section class="ui-panel ui-sticky" aria-labelledby="report-view-h">
         <div class="ui-panel-h"><h2 id="report-view-h" class="ui-h2">報告內容</h2><div v-if="selected" style="display: flex; gap: 8px; flex-wrap: wrap"><a class="ui-btn" :href="`/api/reports/${selected.id}/markdown`" :download="`${selected.id}.md`">下載 Markdown</a><a class="ui-btn" :href="`/api/reports/${selected.id}/stylus.yaml`" :download="`${selected.id}.yaml`">下載 Stylus YAML</a></div></div>
-        <div class="ui-panel-b"><AppEmpty v-if="!selected" title="尚未選擇報告" description="從左側選擇一份，或先產生一份。" /><AppLoading v-else-if="markdownLoading" /><p v-else-if="markdownError" class="ui-callout is-fault">{{ markdownError }}</p><pre v-else class="ui-field" style="white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40rem; overflow: auto" data-testid="report-markdown">{{ markdown }}</pre></div>
+        <div class="ui-panel-b"><AppEmpty v-if="!selected" title="尚未選擇報告" description="從左側選擇一份，或先產生一份。" /><AppLoading v-else-if="markdownLoading" /><p v-else-if="markdownError" class="ui-callout is-fault">{{ markdownError }}</p><pre v-else class="ui-field" style="white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40rem; overflow: auto" role="region" tabindex="0" aria-labelledby="report-view-h" data-testid="report-markdown">{{ markdown }}</pre></div>
       </section>
     </div>
   </div>
