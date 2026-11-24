@@ -4,6 +4,34 @@ using Npgsql;
 
 namespace Draupnir.Api;
 
+/// <summary>
+/// Human Gate 的必要證據規則。前端的 app/lib/evidenceRules.ts 是同一套規則；
+/// 後端必須自己再檢查一次，否則任何登入的管理者都能繞過 UI 直接核准。
+/// </summary>
+public static class GateRules
+{
+    public const string ExceptionPrefix = "【人工例外決定：缺少或未通過必要證據】";
+    public const int MinimumExceptionReasonLength = 20;
+
+    /// <summary>沒有通過的證據、有失敗的證據，或審查要求修改時，就不能直接核准。</summary>
+    public static bool NeedsException(IEnumerable<EvidenceResult> results, IEnumerable<Verdict> verdicts)
+    {
+        var evidence = results as IReadOnlyCollection<EvidenceResult> ?? results.ToList();
+        var reviews = verdicts as IReadOnlyCollection<Verdict> ?? verdicts.ToList();
+        var hasPass = evidence.Contains(EvidenceResult.Pass);
+        var hasFail = evidence.Contains(EvidenceResult.Fail);
+        var changesRequested = reviews.Contains(Verdict.ChangesRequested);
+        return !hasPass || hasFail || changesRequested;
+    }
+
+    /// <summary>人工例外必須帶固定前綴，且理由至少 20 字（去掉前後空白）。</summary>
+    public static bool IsValidExceptionNote(string? note)
+    {
+        if (note is null || !note.StartsWith(ExceptionPrefix, StringComparison.Ordinal)) return false;
+        return note[ExceptionPrefix.Length..].Trim().Length >= MinimumExceptionReasonLength;
+    }
+}
+
 public static class ApiRules
 {
     public static IResult Missing() => Results.Problem("Resource not found.", statusCode: 404);

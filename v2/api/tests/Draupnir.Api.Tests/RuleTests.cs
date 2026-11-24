@@ -45,4 +45,28 @@ public sealed class RuleTests
     [InlineData("reviewer assigned", false)]
     public void ReviewVerdictRequiresExplicitDecision(string input, bool expected) =>
         Assert.Equal(expected, SupervisorImport.TryVerdict(input, out _));
+
+    [Fact]
+    public void GateNeedsAnExceptionUnlessTheWorkItemEvidencePasses()
+    {
+        Assert.True(GateRules.NeedsException([], []));
+        Assert.True(GateRules.NeedsException([EvidenceResult.Fail], []));
+        Assert.True(GateRules.NeedsException([EvidenceResult.Pass], [Verdict.ChangesRequested]));
+        Assert.True(GateRules.NeedsException([EvidenceResult.NotTested], [Verdict.Pass]));
+        Assert.False(GateRules.NeedsException([EvidenceResult.Pass], []));
+        Assert.False(GateRules.NeedsException([EvidenceResult.Pass, EvidenceResult.NotTested], [Verdict.Pass]));
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("核准", false)]
+    [InlineData("【人工例外決定：缺少或未通過必要證據】太短", false)]
+    [InlineData("【人工例外決定：缺少或未通過必要證據】這是十八個字的理由這是十八個字的理由", false)]
+    [InlineData("【人工例外決定：缺少或未通過必要證據】測試環境沒有真實證據，由管理者承擔風險後放行", true)]
+    [InlineData("【人工例外決定：缺少或未通過必要證據】   測試環境沒有真實證據，由管理者承擔風險後放行   ", true)]
+    [InlineData("沒有前綴但理由很長很長很長很長很長很長很長很長很長", false)]
+    public void ExceptionNoteNeedsThePrefixAndTwentyCharacters(string? note, bool expected)
+    {
+        Assert.Equal(expected, GateRules.IsValidExceptionNote(note));
+    }
 }

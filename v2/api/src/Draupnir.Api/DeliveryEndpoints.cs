@@ -39,6 +39,15 @@ public static class DeliveryEndpoints
             if (input.Approved is not { } approved) return Invalid("approved", "A decision is required.");
             if (await db.Gates.FindAsync(id) is not { } gate) return Missing();
             if (gate.Status != GateStatus.Pending) return Conflict("This gate already has a human decision.");
+            if (approved && gate.WorkItemId is { } workItemId)
+            {
+                // 前端 app/lib/evidenceRules.ts 的規則必須在後端再驗一次，
+                // 否則直接呼叫這個端點就能跳過必要證據。沒有對應工作項目的 Gate 仍屬人工判斷。
+                var results = await db.Evidence.Where(e => e.WorkItemId == workItemId).Select(e => e.Result).ToListAsync();
+                var verdicts = await db.Reviews.Where(r => r.WorkItemId == workItemId).Select(r => r.Verdict).ToListAsync();
+                if (GateRules.NeedsException(results, verdicts) && !GateRules.IsValidExceptionNote(input.Note))
+                    return Invalid("note", "必要證據未齊全：核准必須使用人工例外，並寫明至少 20 字的理由。");
+            }
             gate.Status = approved ? GateStatus.Approved : GateStatus.Rejected;
             gate.DecidedBy = user.Id;
             gate.DecidedAt = DateTimeOffset.UtcNow;

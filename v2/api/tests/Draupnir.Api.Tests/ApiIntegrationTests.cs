@@ -210,6 +210,37 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
     }
 
     [Fact]
+    public async Task GateOnAWorkItemCannotBeApprovedWithoutEvidenceOrAnException()
+    {
+        using var client = await AuthorizedClient();
+        var project = await NewProject(client, "GATEEV");
+        var item = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/work-items",
+            new { code = "GATEEV-1", title = "Gate target", type = "Task" }));
+        var workItemId = item.GetProperty("id").GetGuid();
+        var gate = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
+            new { title = "Needs evidence", workItemId, externalRef = "test:GW-1" }));
+        var route = $"/api/gates/{gate.GetProperty("id")}/decision";
+
+        // 直接核准必須被後端擋下（前端規則不能是唯一防線）
+        var blocked = await client.PostAsJsonAsync(route, new { approved = true, note = "ok" });
+        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
+        Assert.True((await Json(blocked, requireSuccess: false)).GetProperty("errors").TryGetProperty("note", out _));
+
+        // 駁回不需要證據
+        var rejected = await Json(await client.PostAsJsonAsync(route, new { approved = false, note = "no evidence" }));
+        Assert.Equal("Rejected", rejected.GetProperty("status").GetString());
+
+        // 同一個工作項目的第二個 Gate：人工例外（前綴 + 20 字）可以核准
+        var second = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
+            new { title = "Needs exception", workItemId, externalRef = "test:GW-2" }));
+        var reason = "測試環境沒有真實證據，由管理者承擔風險後放行";
+        var approved = await Json(await client.PostAsJsonAsync($"/api/gates/{second.GetProperty("id")}/decision",
+            new { approved = true, note = $"{GateRules.ExceptionPrefix}{reason}" }));
+        Assert.Equal("Approved", approved.GetProperty("status").GetString());
+        Assert.StartsWith(GateRules.ExceptionPrefix, approved.GetProperty("note").GetString());
+    }
+
+    [Fact]
     public async Task SingleActiveSprintAndMilestoneAssociationsAreEnforced()
     {
         using var client = await AuthorizedClient();
