@@ -56,7 +56,7 @@ dotnet build --no-restore
 dotnet test --no-build --no-restore
 ~~~
 
-Integration tests use WebApplicationFactory and PostgreSQL. The test connection defaults to the local postgres maintenance database at port 55432. DRAUPNIR_TEST_POSTGRES overrides it. The integration test fixture creates, migrates, and removes its own draupnir_test_<guid> database. Current tests: API 22/22, Web 31/31, Playwright 2/2 (desktop and 360px); the E2E now includes Bug severity and a two-user access check; Spool evidence is covered by API/Web tests. To include actual DOCX rendering in the report test, set DRAUPNIR_TEST_STYLUS_EXECUTABLE to a local Stylus executable.
+Integration tests use WebApplicationFactory and PostgreSQL. The test connection defaults to the local postgres maintenance database at port 55432. DRAUPNIR_TEST_POSTGRES overrides it. The integration test fixture creates, migrates, and removes its own draupnir_test_<guid> database. Current tests: API 32/32, Web 40/40, Playwright 26/26 (desktop 1280 and 390px; delivery flow, V2.1 acceptance and keyboard/a11y); the E2E includes Bug severity, a two-user access check, gate evidence rules and the audit log. Spool evidence is covered by API/Web tests. The V2.1 workspace (Direction D) and the requirement matrix are described in `../docs/v21/ACCEPTANCE.md`. To include actual DOCX rendering in the report test, set DRAUPNIR_TEST_STYLUS_EXECUTABLE to a local Stylus executable.
 
 ## Web（Nuxt 4）
 
