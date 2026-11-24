@@ -37,16 +37,17 @@ public static class GateRules
 
     /// <summary>
     /// The evidence set that the gate decision actually evaluates.
-    /// Only the latest attempt of each source (Source + SourceInstance) is required;
-    /// evidence older than the work item's last update is stale and cannot be the sole
-    /// basis for approval. Blocked and NotTested are not passes; they only affect the
-    /// "missing pass" condition, while Fail and ChangesRequested block approval.
+    /// Only the latest attempt of each source task (Source + SourceInstance + ExternalTaskId)
+    /// is required; the gate's work item aggregates the per-task results. Evidence older than
+    /// the work item's last update is stale and cannot be the sole basis for approval.
+    /// Blocked and NotTested are not passes; they only affect the "missing pass" condition,
+    /// while Fail and ChangesRequested block approval.
     /// </summary>
     public static GateEvidenceEvaluation Evaluate(WorkItem workItem,
         IEnumerable<AgentRun> runs, IEnumerable<Evidence> evidence, IEnumerable<Review> reviews)
     {
         var latestRuns = runs.Where(r => r.WorkItemId == workItem.Id)
-            .GroupBy(r => new { r.Source, r.SourceInstance })
+            .GroupBy(r => new { r.Source, r.SourceInstance, r.ExternalTaskId })
             .Select(group => group.OrderByDescending(r => r.Attempt)
                 .ThenByDescending(r => r.StartedAt).First())
             .ToList();

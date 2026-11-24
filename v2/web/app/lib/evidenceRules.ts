@@ -32,11 +32,11 @@ export function gateEvidence(gate: HumanGate, trace: Trace | null): GateEvidence
     }
   }
 
-  // Only the latest attempt of each source is required evidence. Older attempts remain in
-  // the trace for history but must not block a successful retry.
+  // Only the latest attempt of each source task is required evidence. The work item aggregates
+  // the per-task results; older attempts remain in the trace but must not block a successful retry.
   const latestBySource = new Map<string, typeof trace.runs[number]>()
   for (const run of trace.runs) {
-    const key = `${run.source}|${run.sourceInstance ?? ''}`
+    const key = `${run.source}|${run.sourceInstance ?? ''}|${run.externalTaskId}`
     const current = latestBySource.get(key)
     if (!current || run.attempt > current.attempt ||
       (run.attempt === current.attempt && String(run.startedAt ?? '') > String(current.startedAt ?? ''))) {
