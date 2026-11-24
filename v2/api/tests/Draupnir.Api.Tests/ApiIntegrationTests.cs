@@ -195,7 +195,7 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         var gate = await Json(await admin.PostAsJsonAsync($"/api/projects/{allowed}/gates", new { title = "Member cannot approve" }));
         Assert.Equal(HttpStatusCode.Forbidden, (await member.PostAsJsonAsync($"/api/gates/{gate.GetProperty("id")}/decision",
             new { approved = true })).StatusCode);
-        await Json(await admin.PostAsJsonAsync($"/api/gates/{gate.GetProperty("id")}/decision", new { approved = true }));
+        await Json(await admin.PostAsJsonAsync($"/api/gates/{gate.GetProperty("id")}/decision", new { approved = true, note = "Reviewed by the local administrator." }));
 
         var audit = await Json(await admin.GetAsync("/api/audit"));
         Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "auth.login");
@@ -245,7 +245,7 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(HttpStatusCode.Created, (await AddDependency(client, work, other)).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/work-items/{work}/dependencies/{other}")).StatusCode);
         var gate = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates", new { title = "Audited gate" }));
-        await Json(await client.PostAsJsonAsync($"/api/gates/{gate.GetProperty("id")}/decision", new { approved = true }));
+        await Json(await client.PostAsJsonAsync($"/api/gates/{gate.GetProperty("id")}/decision", new { approved = true, note = "Reviewed by the local administrator." }));
         await Json(await client.PostAsJsonAsync($"/api/projects/{project}/reports", new { title = "Audited report" }));
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/projects/{project}")).StatusCode);
 
@@ -263,6 +263,27 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         await Login(client);
         var afterLogout = await Json(await client.GetAsync("/api/audit"));
         Assert.Contains(afterLogout.EnumerateArray(), row => row.GetProperty("action").GetString() == "auth.logout");
+    }
+
+    [Fact]
+    public async Task F03SameTaskIdInTwoSourceInstancesStaysSeparate()
+    {
+        using var client = await AuthorizedClient();
+        var first = await NewProject(client, "SRCA");
+        var second = await NewProject(client, "SRCB");
+        var payload = new
+        {
+            tasks = new[] { new { id = "SHARED-TASK", title = "Same id", status = "DONE", repo = "sandbox",
+                implementer = "t1", attempt = 1 } }
+        };
+        var one = await client.PostAsJsonAsync($"/api/import/supervisor?projectId={first}&sourceInstance=one", payload);
+        var two = await client.PostAsJsonAsync($"/api/import/supervisor?projectId={second}&sourceInstance=two", payload);
+        Assert.Equal(HttpStatusCode.OK, one.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, two.StatusCode);
+        Assert.Equal(1, await ListCount(client, $"/api/agent-runs?projectId={first}"));
+        Assert.Equal(1, await ListCount(client, $"/api/agent-runs?projectId={second}"));
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/import/supervisor?projectId={first}&sourceInstance=one", payload)).StatusCode);
+        Assert.Equal(1, await ListCount(client, $"/api/agent-runs?projectId={first}"));
     }
 
     [Fact]
@@ -294,10 +315,10 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         var route = $"/api/gates/{gate.GetProperty("id")}/decision";
         using var anon = NewClient();
         Assert.Equal(HttpStatusCode.Unauthorized, (await anon.PostAsJsonAsync(route, new { approved = true })).StatusCode);
-        var decision = await Json(await client.PostAsJsonAsync(route, new { approved = true, note = "Reviewed" }));
+        var decision = await Json(await client.PostAsJsonAsync(route, new { approved = true, note = "Reviewed by the local administrator." }));
         Assert.Equal("Approved", decision.GetProperty("status").GetString());
         Assert.NotEqual(Guid.Empty, decision.GetProperty("decidedBy").GetGuid());
-        Assert.Equal("Reviewed", decision.GetProperty("note").GetString());
+        Assert.Equal("Reviewed by the local administrator.", decision.GetProperty("note").GetString());
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync(route, new { approved = false })).StatusCode);
     }
 
@@ -330,6 +351,110 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
             new { approved = true, note = $"{GateRules.ExceptionPrefix}{reason}" }));
         Assert.Equal("Approved", approved.GetProperty("status").GetString());
         Assert.StartsWith(GateRules.ExceptionPrefix, approved.GetProperty("note").GetString());
+    }
+
+    [Fact]
+    public async Task GateRejectsMissingFailChangesAndNonPassEvidence()
+    {
+        using var client = await AuthorizedClient();
+        var project = await NewProject(client, "GATEAA");
+
+        async Task<Guid> Item(string suffix) =>
+            await NewWork(client, project, $"GATEAA-{suffix}", $"Gate target {suffix}");
+
+        async Task<Guid> Gate(Guid item, string suffix) =>
+            (await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
+                new { title = $"Gate {suffix}", workItemId = item, externalRef = $"test:F04-{suffix}" }))).GetProperty("id").GetGuid();
+
+        // missing evidence
+        var missing = await Item("1");
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.PostAsJsonAsync($"/api/gates/{await Gate(missing, "missing")}/decision", new { approved = true })).StatusCode);
+
+        // Fail
+        var failed = await Item("2");
+        await ImportEvidence(client, project, failed, "F04-FAIL", 1, "Fail");
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.PostAsJsonAsync($"/api/gates/{await Gate(failed, "fail")}/decision", new { approved = true })).StatusCode);
+
+        // ChangesRequested
+        var changed = await Item("3");
+        await ImportEvidence(client, project, changed, "F04-CHANGES", 1, null, verdict: "ChangesRequested");
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.PostAsJsonAsync($"/api/gates/{await Gate(changed, "changes")}/decision", new { approved = true })).StatusCode);
+
+        // NotTested only
+        var notTested = await Item("4");
+        await ImportEvidence(client, project, notTested, "F04-NOTTESTED", 1, "NotTested");
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.PostAsJsonAsync($"/api/gates/{await Gate(notTested, "nottested")}/decision", new { approved = true })).StatusCode);
+
+        // Blocked only
+        var blocked = await Item("5");
+        await ImportEvidence(client, project, blocked, "F04-BLOCKED", 1, "Blocked");
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.PostAsJsonAsync($"/api/gates/{await Gate(blocked, "blocked")}/decision", new { approved = true })).StatusCode);
+    }
+
+    [Fact]
+    public async Task GateUsesOnlyTheLatestAttemptAndFreshEvidence()
+    {
+        using var client = await AuthorizedClient();
+        var project = await NewProject(client, "GATEAB");
+
+        var retried = await NewWork(client, project, "GATEAB-1", "Retried");
+        await ImportEvidence(client, project, retried, "F04-RETRY", 1, "Fail",
+            DateTimeOffset.UtcNow.AddHours(-2));
+        // The old Fail is stale after this update; the newer attempt still supplies a fresh Pass.
+        await client.PatchAsJsonAsync($"/api/work-items/{retried}/status", new { status = "InProgress" });
+        await ImportEvidence(client, project, retried, "F04-RETRY", 2, "Pass");
+        var retriedGate = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
+            new { title = "Retried gate", workItemId = retried, externalRef = "test:F04-RETRY" }));
+        var approved = await Json(await client.PostAsJsonAsync($"/api/gates/{retriedGate.GetProperty("id")}/decision",
+            new { approved = true }));
+        Assert.Equal("Approved", approved.GetProperty("status").GetString());
+        var snapshot = approved.GetProperty("evidenceSnapshot");
+        Assert.False(snapshot.GetProperty("exceptionUsed").GetBoolean());
+        Assert.Equal(1, snapshot.GetProperty("counts").GetProperty("Pass").GetInt32());
+        Assert.Equal(0, snapshot.GetProperty("counts").GetProperty("Fail").GetInt32());
+
+        // A newer work-item update makes the old pass stale; it cannot be the sole basis.
+        var stale = await NewWork(client, project, "GATEAB-2", "Stale");
+        await ImportEvidence(client, project, stale, "F04-STALE", 1, "Pass",
+            DateTimeOffset.UtcNow.AddHours(-1));
+        await client.PatchAsJsonAsync($"/api/work-items/{stale}/status", new { status = "InProgress" });
+        var staleGate = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
+            new { title = "Stale gate", workItemId = stale, externalRef = "test:F04-STALE" }));
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.PostAsJsonAsync($"/api/gates/{staleGate.GetProperty("id")}/decision", new { approved = true })).StatusCode);
+    }
+
+    [Fact]
+    public async Task GateManualExceptionAndNoWorkItemReasonAreRecordedInSnapshotAndAudit()
+    {
+        using var client = await AuthorizedClient();
+        var project = await NewProject(client, "GATEAC");
+        var item = await NewWork(client, project, "GATEAC-1", "Exception");
+        await ImportEvidence(client, project, item, "F04-EXCEPTION", 1, "Fail");
+        var exceptionGate = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
+            new { title = "Exception gate", workItemId = item, externalRef = "test:F04-EXCEPTION" }));
+        var reason = "測試環境沒有真實證據，由管理者承擔風險後放行";
+        var exception = await Json(await client.PostAsJsonAsync($"/api/gates/{exceptionGate.GetProperty("id")}/decision",
+            new { approved = true, note = $"{GateRules.ExceptionPrefix}{reason}" }));
+        Assert.True(exception.GetProperty("evidenceSnapshot").GetProperty("exceptionUsed").GetBoolean());
+
+        var empty = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
+            new { title = "Manual gate", externalRef = "test:F04-MANUAL" }));
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.PostAsJsonAsync($"/api/gates/{empty.GetProperty("id")}/decision", new { approved = true })).StatusCode);
+        var manual = await Json(await client.PostAsJsonAsync($"/api/gates/{empty.GetProperty("id")}/decision",
+            new { approved = true, note = "這是沒有工作項目的人工判斷理由，至少二十字。" }));
+        Assert.Equal("Approved", manual.GetProperty("status").GetString());
+        Assert.Equal("這是沒有工作項目的人工判斷理由，至少二十字。",
+            manual.GetProperty("evidenceSnapshot").GetProperty("manualReason").GetString());
+        var audit = await Json(await client.GetAsync("/api/audit"));
+        Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "gate.decision" &&
+            row.GetProperty("detail").GetString()!.Contains("reason=這是沒有工作項目的人工判斷理由"));
     }
 
     [Fact]
@@ -420,6 +545,26 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(1, await ListCount(client, $"/api/projects/{project}/reports"));
         var audit = await Json(await client.GetAsync("/api/audit"));
         Assert.Contains(audit.EnumerateArray(), row => row.GetProperty("action").GetString() == "report.generate");
+    }
+
+    private static async Task ImportEvidence(HttpClient client, Guid project, Guid workItem, string taskId,
+        int attempt, string? result, DateTimeOffset? recordedAt = null, string? verdict = null)
+    {
+        var evidence = result is null ? Array.Empty<object>() : new object[]
+        {
+            new { id = $"{taskId}-evidence", kind = "Test", title = $"{taskId} evidence", path = "test.log",
+                result, recordedAt = (recordedAt ?? DateTimeOffset.UtcNow).ToString("O") }
+        };
+        var payload = new
+        {
+            tasks = new[]
+            {
+                new { id = taskId, status = "DONE", repo = "sandbox", implementer = "t1", attempt, workItemId = workItem,
+                    evidence, review = verdict is null ? null : new { verdict } }
+            }
+        };
+        var response = await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}&sourceInstance=gate-f04", payload);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     private HttpClient NewClient() => postgres.Factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
