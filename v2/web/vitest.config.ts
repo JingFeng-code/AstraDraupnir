@@ -9,6 +9,8 @@ export default defineConfig({
     projects: [
       await defineVitestProject({
         resolve: { alias: { '~': appDir } },
+        // node_modules may be a junction to a sibling worktree; allow files outside the project root
+        server: { fs: { strict: false } },
         test: {
           name: 'nuxt',
           include: ['tests/**/*.test.ts'],
