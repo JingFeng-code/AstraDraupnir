@@ -1,0 +1,9 @@
+@Draupnir.Api_HostAddress = http://localhost:5287
+
+GET {{Draupnir.Api_HostAddress}}/openapi/v1.json
+Accept: application/json
+
+###
+
+GET {{Draupnir.Api_HostAddress}}/api/auth/me
+Accept: application/json
