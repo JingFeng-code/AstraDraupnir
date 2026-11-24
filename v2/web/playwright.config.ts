@@ -23,8 +23,8 @@ export default defineConfig({
   webServer: {
     command: 'node .output/server/index.mjs',
     url: `http://127.0.0.1:${port}`,
-    // Reusing whatever already listens on the port can test a foreign server; opt in with E2E_REUSE=1.
-    reuseExistingServer: process.env.E2E_REUSE === '1',
+    // Always start the .output server from this worktree; never reuse a foreign target.
+    reuseExistingServer: false,
     env: {
       PORT: String(port),
       HOST: '127.0.0.1',

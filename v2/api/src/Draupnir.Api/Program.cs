@@ -64,8 +64,12 @@ app.MapGet("/api/health", async (DraupnirDb db) =>
     var preview = normalized is "draupnir" or "draupnir_v21" or "draupnir_design";
     var disposable = !preview && (normalized.StartsWith("draupnir_test_") ||
         normalized.EndsWith("_e2e") || normalized.EndsWith("_test") ||
-        normalized.EndsWith("_fix2") || normalized.EndsWith("_accept"));
-    return Results.Ok(new { status = canConnect ? "ok" : "unavailable", database, disposable });
+        normalized.EndsWith("_fix2") || normalized.EndsWith("_fix3") ||
+        normalized.EndsWith("_accept"));
+    // A random token supplied at API startup; the E2E guard must match the same value.
+    // It is not a secret or a credential, only an instance identity for a disposable run.
+    var instance = app.Configuration["E2E_INSTANCE_TOKEN"]?.Trim();
+    return Results.Ok(new { status = canConnect ? "ok" : "unavailable", database, disposable, instance });
 });
 var api = app.MapGroup("/api").RequireAuthorization();
 
