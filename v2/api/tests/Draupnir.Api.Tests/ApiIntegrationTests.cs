@@ -1,3 +1,4 @@
+using Npgsql;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -566,6 +567,163 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
     }
 
     [Fact]
+    public async Task GatesAreSeparatePerSourceInstanceAndKeepTheirDecision()
+    {
+        using var client = await AuthorizedClient();
+        var project = await NewProject(client, "SRCGATE");
+        var payload = new
+        {
+            tasks = new[] { new { id = "TASK-001", title = "Source gate", status = "WAITING_HUMAN",
+                requiresHuman = true, repo = "sandbox", implementer = "t1" } }
+        };
+        await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}&sourceInstance=one", payload));
+        await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}&sourceInstance=two", payload));
+        var gates = (await Json(await client.GetAsync($"/api/projects/{project}/gates"))).EnumerateArray().ToList();
+        Assert.Equal(2, gates.Count);
+        var one = gates.Single(g => g.GetProperty("externalRef").GetString()!.Contains(":one:"));
+        var two = gates.Single(g => g.GetProperty("externalRef").GetString()!.Contains(":two:"));
+
+        // A 核准不影響 B
+        await Json(await client.PostAsJsonAsync($"/api/gates/{one.GetProperty("id")}/decision",
+            new { approved = true, note = "Source one reviewed by a human" }));
+        var afterApprove = (await Json(await client.GetAsync($"/api/projects/{project}/gates"))).EnumerateArray().ToList();
+        Assert.Equal("Approved", afterApprove.Single(g => g.GetProperty("id").GetGuid() == one.GetProperty("id").GetGuid()).GetProperty("status").GetString());
+        Assert.Equal("Pending", afterApprove.Single(g => g.GetProperty("id").GetGuid() == two.GetProperty("id").GetGuid()).GetProperty("status").GetString());
+
+        // 同來源重匯仍冪等，且不覆蓋已決定的 Gate
+        await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}&sourceInstance=one", payload));
+        var afterReimport = (await Json(await client.GetAsync($"/api/projects/{project}/gates"))).EnumerateArray().ToList();
+        Assert.Equal(2, afterReimport.Count);
+        Assert.Equal("Approved", afterReimport.Single(g => g.GetProperty("id").GetGuid() == one.GetProperty("id").GetGuid()).GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task LegacyGateWithoutSourceInstanceIsAdoptedNotDuplicated()
+    {
+        using var client = await AuthorizedClient();
+        var project = await NewProject(client, "LEGACY");
+        // 升級前格式的 Gate（沒有來源實例）
+        var legacy = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
+            new { title = "Legacy gate", externalRef = "supervisor:LEG-1" }));
+        var payload = new
+        {
+            tasks = new[] { new { id = "LEG-1", title = "Legacy gate", status = "WAITING_HUMAN",
+                requiresHuman = true, repo = "sandbox", implementer = "t1" } }
+        };
+        await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}", payload));
+        var gates = (await Json(await client.GetAsync($"/api/projects/{project}/gates"))).EnumerateArray().ToList();
+        Assert.Single(gates);
+        Assert.Equal(legacy.GetProperty("id").GetGuid(), gates[0].GetProperty("id").GetGuid());
+        Assert.Contains(":LEGACY:", gates[0].GetProperty("externalRef").GetString());
+    }
+
+    [Fact]
+    public async Task ProjectRenameDoesNotChangeTheImportNamespace()
+    {
+        using var client = await AuthorizedClient();
+        var project = await NewProject(client, "RENAME");
+        var payload = new
+        {
+            tasks = new[] { new { id = "TASK-9", title = "Rename gate", status = "WAITING_HUMAN",
+                requiresHuman = true, repo = "sandbox", implementer = "t1" } }
+        };
+        await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}", payload));
+        var first = (await Json(await client.GetAsync($"/api/projects/{project}/gates"))).EnumerateArray().Single();
+        // 沒有工作項目時可以改 Key
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/projects/{project}",
+            new { key = "RENAMED", name = "Renamed", status = "Active" })).StatusCode);
+        await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}", payload));
+        var gates = (await Json(await client.GetAsync($"/api/projects/{project}/gates"))).EnumerateArray().ToList();
+        Assert.Single(gates);
+        Assert.Equal(first.GetProperty("id").GetGuid(), gates[0].GetProperty("id").GetGuid());
+    }
+
+    [Fact]
+    public async Task DecisionSnapshotDoesNotChangeWhenTheEvidenceIsReimported()
+    {
+        using var client = await AuthorizedClient();
+        var project = await NewProject(client, "SNAP");
+        var work = await NewWork(client, project, "SNAP-1", "Snapshot item");
+        var passPayload = new
+        {
+            tasks = new[] { new { id = "SNAP-TASK", title = "Snapshot gate", status = "REVIEW_READY",
+                implementer = "t1", workItemId = work,
+                evidence = new[] { new { kind = "Test", title = "Suite", path = "test.log", result = "Pass" } },
+                requiresHuman = true } }
+        };
+        var uri = $"/api/import/supervisor?projectId={project}";
+        await Json(await client.PostAsJsonAsync(uri, passPayload));
+        var gate = (await Json(await client.GetAsync($"/api/projects/{project}/gates"))).EnumerateArray().Single();
+        var decided = await Json(await client.PostAsJsonAsync($"/api/gates/{gate.GetProperty("id")}/decision",
+            new { approved = true, note = "Evidence checked by a human" }));
+        var snapshot = decided.GetProperty("evidenceSnapshot");
+        Assert.Contains("contentHash", snapshot.GetProperty("usedEvidence").GetRawText());
+        var canonical = CanonicalJson(snapshot);
+
+        // 重新匯入並把同一筆證據改成 Fail：歷史決策快照不得變動
+        var failPayload = new
+        {
+            tasks = new[] { new { id = "SNAP-TASK", title = "Snapshot gate", status = "REVIEW_READY",
+                implementer = "t1", workItemId = work,
+                evidence = new[] { new { kind = "Test", title = "Suite", path = "test.log", result = "Fail" } },
+                requiresHuman = true } }
+        };
+        await Json(await client.PostAsJsonAsync(uri, failPayload));
+        var after = (await Json(await client.GetAsync($"/api/projects/{project}/gates"))).EnumerateArray().Single();
+        Assert.Equal(canonical, CanonicalJson(after.GetProperty("evidenceSnapshot")));
+        Assert.Equal("Approved", after.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task ExactlyTwoAdminsStayAtOneUnderConcurrentDemotions()
+    {
+        using var adminA = await AuthorizedClient();
+        var emailB = "only-b@example.test";
+        var passwordB = "Only-b-pass-1";
+        var idB = (await Json(await adminA.PostAsJsonAsync("/api/users",
+            new { email = emailB, displayName = "Only B", password = passwordB, role = "Admin" }))).GetProperty("id").GetGuid();
+        var idA = (await Json(await adminA.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid();
+        // 讓 A、B 成為僅有的兩位有效 Admin
+        var users = (await Json(await adminA.GetAsync("/api/users"))).EnumerateArray()
+            .Where(u => u.GetProperty("role").GetString() == "Admin").ToList();
+        foreach (var other in users.Where(u => u.GetProperty("id").GetGuid() != idA && u.GetProperty("id").GetGuid() != idB))
+            Assert.Equal(HttpStatusCode.OK, (await adminA.PatchAsJsonAsync($"/api/users/{other.GetProperty("id").GetGuid()}",
+                new { isActive = false })).StatusCode);
+        using var adminB = NewClient();
+        await LoginAs(adminB, emailB, passwordB);
+
+        using var barrier = new Barrier(2);
+        async Task<HttpStatusCode> Deactivate(HttpClient client, Guid target)
+        {
+            barrier.SignalAndWait();
+            return (await client.PatchAsJsonAsync($"/api/users/{target}", new { isActive = false })).StatusCode;
+        }
+
+        var codes = await Task.WhenAll(Task.Run(() => Deactivate(adminA, idB)), Task.Run(() => Deactivate(adminB, idA)));
+        Assert.Contains(codes, code => code == HttpStatusCode.OK);
+        Assert.Contains(codes, code => code != HttpStatusCode.OK);
+
+        // 直接查測試資料庫，確認 invariant 真的成立（不靠 API）
+        await using var connection = new Npgsql.NpgsqlConnection(postgres.ConnectionString);
+        await connection.OpenAsync();
+        await using (var command = new Npgsql.NpgsqlCommand(
+            "SELECT count(*) FROM \"Users\" WHERE \"Role\" = 0 AND \"IsActive\" = true", connection))
+        {
+            var active = Convert.ToInt64(await command.ExecuteScalarAsync());
+            Assert.True(active >= 1, $"active admins = {active}");
+        }
+
+        // 還原 A、B 以免影響同一資料庫的其他測試
+        await using (var restore = new Npgsql.NpgsqlCommand(
+            "UPDATE \"Users\" SET \"IsActive\" = true, \"SecurityStamp\" = gen_random_uuid() WHERE \"Id\" = ANY(@ids)",
+            connection))
+        {
+            restore.Parameters.AddWithValue("ids", new[] { idA, idB });
+            await restore.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
     public async Task BothRealSupervisorFormatsImportIdempotently()
     {
         using var client = await AuthorizedClient();
@@ -674,6 +832,15 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
         var response = await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}&sourceInstance=gate-f04", payload);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
+
+    /// <summary>把 JSON 依 key 排序後再比較：DB 讀回的快照 key 順序與回應不同，但內容必須一致。</summary>
+    private static string CanonicalJson(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Object => "{" + string.Join(",", element.EnumerateObject().OrderBy(property => property.Name)
+            .Select(property => $"\"{property.Name}\":{CanonicalJson(property.Value)}")) + "}",
+        JsonValueKind.Array => "[" + string.Join(",", element.EnumerateArray().Select(CanonicalJson)) + "]",
+        _ => element.GetRawText()
+    };
 
     private HttpClient NewClient() => postgres.Factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
     private async Task<HttpClient> AuthorizedClient()

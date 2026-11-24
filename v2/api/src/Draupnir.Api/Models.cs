@@ -56,6 +56,8 @@ public sealed class Project
     public string Description { get; set; } = "";
     public ProjectStatus Status { get; set; }
     public string? RepoPath { get; set; }
+    /// <summary>Supervisor 匯入的來源命名空間；第一次匯入時固定，之後不因專案改名而變動。</summary>
+    public string? SourceInstance { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

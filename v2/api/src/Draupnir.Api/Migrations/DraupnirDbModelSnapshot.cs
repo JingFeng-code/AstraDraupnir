@@ -309,6 +309,9 @@ namespace Draupnir.Api.Migrations
                     b.Property<string>("RepoPath")
                         .HasColumnType("text");
 
+                    b.Property<string>("SourceInstance")
+                        .HasColumnType("text");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
@@ -475,11 +478,11 @@ namespace Draupnir.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<Guid>("SecurityStamp")
-                        .HasColumnType("uuid");
-
                     b.Property<int>("Role")
                         .HasColumnType("integer");
+
+                    b.Property<Guid>("SecurityStamp")
+                        .HasColumnType("uuid");
 
                     b.HasKey("Id");
 

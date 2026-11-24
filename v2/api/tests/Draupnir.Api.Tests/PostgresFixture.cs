@@ -11,6 +11,8 @@ public sealed class PostgresFixture : IAsyncLifetime
     private readonly string name = $"draupnir_test_{Guid.NewGuid():N}";
     private NpgsqlConnectionStringBuilder? server;
     public WebApplicationFactory<Program> Factory { get; private set; } = null!;
+    /// <summary>測試資料庫連線字串：讓測試可以直接查 invariant（例如有效 Admin 數量）。</summary>
+    public string ConnectionString { get; private set; } = "";
 
     public async Task InitializeAsync()
     {
@@ -20,6 +22,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         var database = new NpgsqlConnectionStringBuilder(server.ConnectionString) { Database = name };
         var options = new DbContextOptionsBuilder<DraupnirDb>().UseNpgsql(database.ConnectionString).Options;
         await using (var db = new DraupnirDb(options)) await db.Database.MigrateAsync();
+        ConnectionString = database.ConnectionString;
         Factory = new TestHost(database.ConnectionString);
     }
 

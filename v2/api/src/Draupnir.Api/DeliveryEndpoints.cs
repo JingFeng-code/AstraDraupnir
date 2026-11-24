@@ -1,8 +1,10 @@
+using System.Data;
 using System.Diagnostics;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using Microsoft.EntityFrameworkCore;
 using System.Text;
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
 using static Draupnir.Api.ApiRules;
 
 namespace Draupnir.Api;
@@ -38,15 +40,19 @@ public static class DeliveryEndpoints
             if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
             if (!Access.IsAdmin(user)) return Access.Forbidden();
             if (input.Approved is not { } approved) return Invalid("approved", "A decision is required.");
+            // 讀取證據、評估規則、寫入決策必須在同一個交易裡：否則決策可能記到一份已經被更新過的證據。
+            await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
             if (await db.Gates.FindAsync(id) is not { } gate) return Missing();
             if (gate.Status != GateStatus.Pending) return Conflict("This gate already has a human decision.");
             GateRules.GateEvidenceEvaluation? evaluation = null;
             WorkItem? workItem = null;
+            var runById = new Dictionary<Guid, AgentRun>();
             if (gate.WorkItemId is { } workItemId)
             {
                 workItem = await db.WorkItems.FindAsync(workItemId);
                 if (workItem is null) return Missing();
                 var runs = await db.AgentRuns.Where(r => r.WorkItemId == workItemId).ToListAsync();
+                runById = runs.ToDictionary(r => r.Id);
                 var evidence = await db.Evidence.Where(e => e.WorkItemId == workItemId).ToListAsync();
                 var reviews = await db.Reviews.Where(r => r.WorkItemId == workItemId).ToListAsync();
                 evaluation = GateRules.Evaluate(workItem, runs, evidence, reviews);
@@ -78,6 +84,29 @@ public static class DeliveryEndpoints
                     .ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
                 staleCount = evaluation?.StaleEvidence.Count ?? 0,
                 usedEvidenceIds = evaluation?.UsedEvidence.Select(e => e.Id),
+                // 決策當下實際使用的證據內容：即使之後重新匯入改寫原證據，歷史決策仍可追溯。
+                usedEvidence = evaluation?.UsedEvidence.Select(e => new
+                {
+                    id = e.Id,
+                    kind = e.Kind.ToString(),
+                    result = e.Result.ToString(),
+                    recordedAt = e.RecordedAt,
+                    title = e.Title,
+                    path = e.Path,
+                    url = e.Url,
+                    source = e.AgentRunId is { } runId && runById.TryGetValue(runId, out var run) ? run.Source.ToString() : null,
+                    sourceInstance = e.AgentRunId is { } runId2 && runById.TryGetValue(runId2, out var run2) ? run2.SourceInstance : null,
+                    externalTaskId = e.AgentRunId is { } runId3 && runById.TryGetValue(runId3, out var run3) ? run3.ExternalTaskId : null,
+                    attempt = e.AgentRunId is { } runId4 && runById.TryGetValue(runId4, out var run4) ? run4.Attempt : (int?)null,
+                    contentHash = EvidenceHash(e)
+                }),
+                usedReviews = evaluation?.UsedReviews.Select(r => new
+                {
+                    id = r.Id,
+                    reviewer = r.Reviewer,
+                    verdict = r.Verdict.ToString(),
+                    createdAt = r.CreatedAt
+                }),
                 usedReviewIds = evaluation?.UsedReviews.Select(r => r.Id),
                 staleEvidenceIds = evaluation?.StaleEvidence.Select(e => e.Id),
                 ignoredEvidenceIds = evaluation?.IgnoredEvidence.Select(e => e.Id),
@@ -89,6 +118,7 @@ public static class DeliveryEndpoints
             if (gate.WorkItemId is null && approved) auditDetail += $"; reason={input.Note!.Trim()}";
             await Access.Audit(db, user.Id, "gate.decision", "gate", gate.Id, auditDetail);
             await db.SaveChangesAsync();
+            await tx.CommitAsync();
             return Results.Ok(gate);
         });
 
@@ -172,6 +202,15 @@ public static class DeliveryEndpoints
             if (!await Access.CanProject(db, user, report.ProjectId)) return Access.Forbidden();
             return Results.Text(report.StylusSpecYaml, "application/yaml", Encoding.UTF8);
         });
+    }
+
+    /// <summary>證據內容的穩定雜湊：之後重新匯入改寫原證據時，快照仍能指出當時的內容。</summary>
+    private static string EvidenceHash(Evidence evidence)
+    {
+        var payload = !string.IsNullOrWhiteSpace(evidence.Data)
+            ? evidence.Data!
+            : $"{evidence.Kind}|{evidence.Title}|{evidence.Path}|{evidence.Url}|{evidence.Result}|{evidence.RecordedAt:O}";
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
     }
 
     private static IQueryable<AgentRun> Runs(DraupnirDb db, Guid? projectId, Guid? workItemId, bool admin, List<Guid> visible) =>

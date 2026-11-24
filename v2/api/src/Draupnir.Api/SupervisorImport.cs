@@ -22,10 +22,11 @@ public static class SupervisorImport
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         var projects = await db.Projects.ToListAsync();
         if (projectId is not null && !projects.Any(p => p.Id == projectId)) return Missing();
-        // 以專案頁匯入（有 projectId）時，命名空間固定用該專案的 Key：這與 migration 的 legacy backfill 一致，
-        // 升級後第一次重匯才不會對不上舊資料列。沒有 projectId 的 repo 比對路徑才用 payload 的 repo/worktree。
-        var selectedKey = projectId is { } selectedId ? projects.First(project => project.Id == selectedId).Key : null;
-        var instance = ResolveSourceInstance(payload, sourceInstance, selectedKey);
+        // 來源命名空間：明確參數 > payload > 專案上固定的 SourceInstance（第一次匯入時寫入，之後不因改名變動）。
+        // 沒有 projectId 且沒有明確值時，保留舊的 repo/worktree 啟發式（見 ResolveSourceInstance）。
+        var fixedInstance = FixedSourceInstance(payload, sourceInstance);
+        if (fixedInstance is null && projectId is { } selectedId)
+            fixedInstance = InstanceForProject(projects.First(project => project.Id == selectedId));
         var agents = Get(payload, "agents");
         var seenRuns = new HashSet<Guid>();
         var seenEvidence = new HashSet<Guid>();
@@ -36,20 +37,26 @@ public static class SupervisorImport
             var id = Text(row, "id")!.Trim();
             var status = Text(row, "status")!.Trim();
             var attempt = Attempt(row);
-            var run = db.AgentRuns.Local.FirstOrDefault(r => r.Source == RunSource.Supervisor &&
-                r.SourceInstance == instance && r.ExternalTaskId == id && r.Attempt == attempt)
-                ?? await db.AgentRuns.SingleOrDefaultAsync(r => r.Source == RunSource.Supervisor &&
-                    r.SourceInstance == instance && r.ExternalTaskId == id && r.Attempt == attempt);
-            if (run is null)
+            AgentRun? run;
+            if (fixedInstance is { } known)
             {
-                run = new AgentRun { ExternalTaskId = id, SourceInstance = instance, Attempt = attempt, Source = RunSource.Supervisor };
-                db.AgentRuns.Add(run);
+                run = db.AgentRuns.Local.FirstOrDefault(r => r.Source == RunSource.Supervisor &&
+                    r.SourceInstance == known && r.ExternalTaskId == id && r.Attempt == attempt)
+                    ?? await db.AgentRuns.SingleOrDefaultAsync(r => r.Source == RunSource.Supervisor &&
+                        r.SourceInstance == known && r.ExternalTaskId == id && r.Attempt == attempt);
+            }
+            else
+            {
+                // 舊路徑（沒有 projectId、沒有明確 instance）：沿用既有資料列的 namespace。
+                run = await db.AgentRuns.Where(r => r.Source == RunSource.Supervisor &&
+                    r.ExternalTaskId == id && r.Attempt == attempt)
+                    .OrderBy(r => r.ProjectId).FirstOrDefaultAsync();
             }
 
             var repo = Text(row, "repo")?.Trim();
-            if (projectId is not null && run.ProjectId is { } existingProject && existingProject != projectId)
+            if (projectId is not null && run?.ProjectId is { } existingProject && existingProject != projectId)
                 return Conflict("A Supervisor run is already associated with another project.");
-            var project = projects.SingleOrDefault(p => p.Id == (projectId ?? run.ProjectId));
+            var project = projects.SingleOrDefault(p => p.Id == (projectId ?? run?.ProjectId));
             project ??= projects.FirstOrDefault(p => !string.IsNullOrWhiteSpace(repo) &&
                 (string.Equals(p.Key, repo, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(p.Name, repo, StringComparison.OrdinalIgnoreCase)
@@ -65,6 +72,16 @@ public static class SupervisorImport
                     db.Projects.Add(project);
                     projects.Add(project);
                 }
+            }
+            var instance = fixedInstance ?? run?.SourceInstance ?? InstanceForProject(project);
+            if (run is null)
+            {
+                run = new AgentRun { ExternalTaskId = id, SourceInstance = instance, Attempt = attempt, Source = RunSource.Supervisor };
+                db.AgentRuns.Add(run);
+            }
+            else if (run.SourceInstance != instance)
+            {
+                run.SourceInstance = instance;
             }
             if (Guid.TryParse(Text(row, "workItemId"), out var workItemId))
             {
@@ -130,9 +147,23 @@ public static class SupervisorImport
             if (Normalize(status) == "WAITINGHUMAN" || Get(row, "requiresHuman").ValueKind == JsonValueKind.True)
             {
                 var gateInput = Get(row, "gate");
-                var externalRef = Text(gateInput, "externalRef") ?? $"supervisor:{id}";
+                // 來源實例要進 ExternalRef，否則同一專案的兩個來源用同一個 TASK-001 會共用一個 Gate。
+                var externalRef = Text(gateInput, "externalRef") ?? $"supervisor:{instance}:{id}";
                 var gate = db.Gates.Local.FirstOrDefault(g => g.ProjectId == project.Id && g.ExternalRef == externalRef)
                     ?? await db.Gates.SingleOrDefaultAsync(g => g.ProjectId == project.Id && g.ExternalRef == externalRef);
+                if (gate is null && Text(gateInput, "externalRef") is null)
+                {
+                    // 升級前的 Gate 用舊格式 "supervisor:{id}"：只有在專案內沒有其他同格式 Gate 時才接手，
+                    // 保留既有決策與資料，不影響另一個來源實例。
+                    var legacyRef = $"supervisor:{id}";
+                    var legacy = db.Gates.Local.FirstOrDefault(g => g.ProjectId == project.Id && g.ExternalRef == legacyRef)
+                        ?? await db.Gates.SingleOrDefaultAsync(g => g.ProjectId == project.Id && g.ExternalRef == legacyRef);
+                    if (legacy is not null)
+                    {
+                        legacy.ExternalRef = externalRef;
+                        gate = legacy;
+                    }
+                }
                 if (gate is null)
                 {
                     gate = new HumanGate { Id = Guid.NewGuid(), ProjectId = project.Id, ExternalRef = externalRef, Status = GateStatus.Pending };
@@ -174,19 +205,22 @@ public static class SupervisorImport
     }
 
     /// <summary>
-    /// Namespace of one Supervisor import. Explicit ?sourceInstance= wins; otherwise the first
-    /// task's repo/worktree is the deterministic namespace, falling back to "supervisor".
-    /// Never use the Draupnir project id: re-creating a project must not change re-import identity.
+    /// 明確指定的來源命名空間：?sourceInstance= 或 payload 的 sourceInstance。沒有就回 null，
+    /// 由專案上固定的 SourceInstance（第一次匯入時以 Key 寫入）或舊的 repo/worktree 啟發式決定。
     /// </summary>
-    public static string ResolveSourceInstance(JsonElement payload, string? explicitInstance, string? selectedProjectKey = null)
+    public static string? FixedSourceInstance(JsonElement payload, string? explicitInstance)
     {
         if (!string.IsNullOrWhiteSpace(explicitInstance)) return explicitInstance.Trim();
         var payloadInstance = Text(payload, "sourceInstance");
-        if (!string.IsNullOrWhiteSpace(payloadInstance)) return payloadInstance.Trim();
-        if (!string.IsNullOrWhiteSpace(selectedProjectKey)) return selectedProjectKey.Trim();
-        var first = Items(Get(payload, "tasks")).FirstOrDefault();
-        var fromTask = Text(first, "repo") ?? Text(first, "worktree") ?? Text(first, "state");
-        return string.IsNullOrWhiteSpace(fromTask) ? "supervisor" : fromTask.Trim();
+        return string.IsNullOrWhiteSpace(payloadInstance) ? null : payloadInstance.Trim();
+    }
+
+    /// <summary>專案第一次匯入時固定來源命名空間；之後專案改名不會改變它（避免重複的來源識別）。</summary>
+    public static string InstanceForProject(Project project)
+    {
+        // 只設定在追蹤中的實體上，讓匯入結尾的 SaveChanges（同一交易）一起寫入。
+        project.SourceInstance ??= project.Key;
+        return project.SourceInstance;
     }
 
     public static int Attempt(JsonElement row) =>
