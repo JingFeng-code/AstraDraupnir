@@ -14,7 +14,7 @@ function requiredAdminPassword(): string {
 }
 const password = requiredAdminPassword()
 const screenshotDir = process.env.E2E_SCREENSHOT_DIR
-  ?? 'E:/Astra/.astra-runs/AUTONOMOUS-DELIVERY/acceptance/screens/draupnir'
+  ?? 'test-results/screens/draupnir'
 const queue = JSON.parse(
   readFileSync(fileURLToPath(new URL('../../../api/tests/Draupnir.Api.Tests/Fixtures/queue.json', import.meta.url)), 'utf8'),
 ) as { tasks: { id: string }[] }

@@ -20,7 +20,7 @@
       "id": "EXAMPLE-01",
       "title": "Update a local greeter test",
       "repo": "sandbox",
-      "worktree": "E:/Astra/sandbox/greeter",
+      "worktree": "sandbox/greeter",
       "branch": "example/greeter",
       "type": "agent",
       "priority": 10,

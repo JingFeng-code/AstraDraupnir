@@ -4,10 +4,9 @@ The V2 API runs locally with .NET SDK 10, EF Core 10, and PostgreSQL 18. The ori
 
 ## Start PostgreSQL and migrate
 
-Use the existing portable PostgreSQL instance on 127.0.0.1:55432. It uses local trust authentication for development. Start it from the Astra delivery workspace if it is stopped.
+Use any local PostgreSQL 16+ instance (the delivery machine uses a portable PostgreSQL 18 on `127.0.0.1:55432` with local trust authentication). Start it with your usual tooling, then:
 
 ~~~powershell
-pwsh -NoProfile -File E:/Astra/.astra-runs/AUTONOMOUS-DELIVERY/tools/pg-local.ps1 start
 cd v2/api
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
 dotnet build --no-restore

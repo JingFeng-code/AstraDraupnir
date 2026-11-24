@@ -4,8 +4,8 @@
   "agents": {
     "t11j": { "role": "orchestrator", "cli": "claude-code", "model": "claude-opus-5-5", "dispatchable": false },
     "t10m": { "role": "engineer-main", "cli": "codex", "model": "gpt-6.2-sol", "effort": "low (global config, not changed)", "dispatchable": true },
-    "t10n": { "role": "engineer-second", "cli": "pi", "provider": "ollama-cloud", "model": "deepseek-v4.1-flash:1017", "dispatchable": true },
-    "t11k": { "role": "micro-tasks", "cli": "opencode", "model": "opencode/deepseek-v4.1-flash-free", "dispatchable": true, "limits": "single/few files, no large scans" },
+    "t10n": { "role": "engineer-second", "cli": "pi", "provider": "example", "model": "example-model", "dispatchable": true },
+    "t11k": { "role": "micro-tasks", "cli": "opencode", "model": "example-model", "dispatchable": true, "limits": "single/few files, no large scans" },
     "t11t": { "role": "retired", "cli": "codex", "dispatchable": false, "note": "Batch-00 child session; kill denied by classifier; excluded from dispatch" }
   },
   "limits": { "maxWorkers": 3, "maxSameFingerprintFailures": 3 },
