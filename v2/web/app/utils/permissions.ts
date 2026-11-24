@@ -15,3 +15,7 @@ export function canCreateProjects(user: User | null | undefined): boolean {
 export function canApproveGates(user: User | null | undefined): boolean {
   return isAdmin(user)
 }
+
+export function canImport(user: User | null | undefined): boolean {
+  return isAdmin(user)
+}

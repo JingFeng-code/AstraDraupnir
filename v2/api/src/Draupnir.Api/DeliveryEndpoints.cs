@@ -29,6 +29,7 @@ public static class DeliveryEndpoints
             var gate = new HumanGate { Id = Guid.NewGuid(), Title = input.Title, ProjectId = projectId,
                 WorkItemId = input.WorkItemId, ExternalRef = input.ExternalRef };
             db.Gates.Add(gate);
+            await Access.Audit(db, user.Id, "gate.create", "gate", gate.Id, $"project={projectId}");
             await db.SaveChangesAsync();
             return Results.Created($"/api/projects/{projectId}/gates", gate);
         });
@@ -101,12 +102,9 @@ public static class DeliveryEndpoints
         api.MapPost("/import/supervisor", async (JsonElement payload, Guid? projectId, ClaimsPrincipal principal, DraupnirDb db) =>
         {
             if (await Access.Current(db, principal) is not { } user) return Access.Unauthorized();
-            if (projectId is { } selected)
-            {
-                if (!await Access.CanProject(db, user, selected)) return Access.Forbidden();
-            }
-            else if (!Access.IsAdmin(user)) return Access.Forbidden();
-            return await SupervisorImport.Import(payload, projectId, db);
+            if (!Access.IsAdmin(user)) return Access.Forbidden();
+            if (projectId is { } selected && !await Access.CanProject(db, user, selected)) return Access.Forbidden();
+            return await SupervisorImport.Import(payload, projectId, db, user.Id);
         });
 
         api.MapGet("/dashboard", async (Guid? projectId, ClaimsPrincipal principal, DraupnirDb db) =>
@@ -225,6 +223,7 @@ public static class DeliveryEndpoints
         };
         await RenderDocx(report, config, loggerFactory.CreateLogger("Draupnir.Reports"), cancellation);
         db.Reports.Add(report);
+        await Access.Audit(db, user.Id, "report.generate", "report", report.Id, $"project={projectId}");
         await db.SaveChangesAsync(cancellation);
         return Results.Created($"/api/reports/{report.Id}/markdown", report);
     }

@@ -35,6 +35,7 @@ public static class ProjectEndpoints
             input.Id = Guid.NewGuid();
             input.CreatedAt = input.UpdatedAt = DateTimeOffset.UtcNow;
             db.Projects.Add(input);
+            await Access.Audit(db, user.Id, "project.create", "project", input.Id, $"key={input.Key}");
             await db.SaveChangesAsync();
             return Results.Created($"/api/projects/{input.Id}", input);
         });
@@ -53,6 +54,7 @@ public static class ProjectEndpoints
             input.CreatedAt = project.CreatedAt;
             input.UpdatedAt = DateTimeOffset.UtcNow;
             db.Entry(project).CurrentValues.SetValues(input);
+            await Access.Audit(db, user.Id, "project.update", "project", project.Id, $"key={project.Key};status={project.Status}");
             await db.SaveChangesAsync();
             await tx.CommitAsync();
             return Results.Ok(project);
@@ -67,6 +69,7 @@ public static class ProjectEndpoints
             {
                 project.Status = ProjectStatus.Archived;
                 project.UpdatedAt = DateTimeOffset.UtcNow;
+                await Access.Audit(db, user.Id, "project.archive", "project", project.Id, $"key={project.Key}");
                 await db.SaveChangesAsync();
             }
             return Results.NoContent();
@@ -92,6 +95,7 @@ public static class ProjectEndpoints
             if (!await Access.CanProject(db, user, item.ProjectId)) return Access.Forbidden();
             if (await db.Dependencies.FindAsync(id, depId) is not { } dependency) return Missing();
             db.Dependencies.Remove(dependency);
+            await Access.Audit(db, user.Id, "dependency.remove", "work_item", item.Id, $"dependsOn={depId}");
             await db.SaveChangesAsync();
             return Results.NoContent();
         });
@@ -105,6 +109,7 @@ public static class ProjectEndpoints
             if (await CheckStatus(db, id, status, input.Reason) is { } issue) return issue;
             item.Status = status;
             item.BlockedReason = status == WorkStatus.Blocked ? input.Reason : null;
+            await Access.Audit(db, user.Id, "work_item.status", "work_item", item.Id, $"status={status}");
             await db.SaveChangesAsync();
             await transaction.CommitAsync();
             return Results.Ok(item);
@@ -172,6 +177,9 @@ public static class ProjectEndpoints
         }
         if (existing is null) db.Add(input);
         else db.Entry(existing).CurrentValues.SetValues(input);
+        var action = resource.TrimEnd('s').Replace("-", "_") + (id is null ? ".create" : ".update");
+        var code = input switch { Requirement r => r.Code, WorkItem w => w.Code, Sprint s => s.Name, Milestone m => m.Name, _ => input.Id.ToString() };
+        await Access.Audit(db, user.Id, action, resource, input.Id, $"code={code}");
         await db.SaveChangesAsync();
         await transaction.CommitAsync();
         return id is null ? Results.Created($"/api/projects/{projectId}/{resource}/{input.Id}", input) : Results.Ok(input);
@@ -225,6 +233,7 @@ public static class ProjectEndpoints
             return Conflict("The dependency already exists.");
         var created = new WorkItemDependency { WorkItemId = id, DependsOnId = target };
         db.Dependencies.Add(created);
+        await Access.Audit(db, user.Id, "dependency.add", "work_item", id, $"dependsOn={target}");
         await db.SaveChangesAsync();
         await transaction.CommitAsync();
         return Results.Created($"/api/work-items/{id}/dependencies/{target}", created);

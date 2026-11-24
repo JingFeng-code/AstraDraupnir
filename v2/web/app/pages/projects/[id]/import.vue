@@ -2,8 +2,12 @@
 import type { ImportResult } from '~/types/api'
 import { ApiError, toApiError } from '~/utils/errors'
 
+import { canImport } from '~/utils/permissions'
+
 const route = useRoute()
 const api = useApi()
+const auth = useAuth()
+const admin = computed(() => canImport(auth.state.value.user))
 const ws = useWorkspace()
 const id = computed(() => String(route.params.id))
 const payload = ref('')
@@ -77,7 +81,8 @@ async function loadFixture() {
       <p class="ui-meta">匯入後看到的是當時的 AgentRun／證據／Review／Gate 歷史，不是「目前正在執行」。重複匯入是冪等的，會更新同一筆紀錄，不會覆寫已有人工決定。Draupnir 不會把 Gate 決定同步回 Supervisor。</p>
     </div>
 
-    <div class="ui-panel" style="margin-top: 20px">
+    <AppNotice v-if="!admin" class="ui-callout" tone="info" message="只有 Admin 可以匯入 Supervisor 快照；Member 仍可閱讀已匯入的紀錄。" />
+    <div v-else class="ui-panel" style="margin-top: 20px">
       <div class="ui-panel-b ui-stack">
         <label class="ui-stack" style="gap: 6px"><span class="ui-meta">上傳 JSON</span><input id="import-file" type="file" accept="application/json,.json" class="ui-input" data-testid="import-file" @change="onFile"><span v-if="fileName" class="ui-meta">已載入：{{ fileName }}</span></label>
         <label class="ui-stack" style="gap: 6px"><span class="ui-meta">或貼上內容</span><textarea id="import-payload" v-model="payload" rows="12" class="ui-field" style="font-family: var(--font-mono); font-size: 14px" placeholder='{ "tasks": [ ... ] }' data-testid="import-payload" @input="parsePreview(payload)" /></label>
@@ -94,3 +99,8 @@ async function loadFixture() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.ui-panel-b label, .ui-panel-b .ui-stack { min-width: 0; }
+textarea.ui-field, input.ui-input, select.ui-input { min-width: 0; }
+</style>

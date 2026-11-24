@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canApproveGates, canCreateProjects, canManageUsers, isAdmin } from '~/utils/permissions'
+import { canApproveGates, canCreateProjects, canImport, canManageUsers, isAdmin } from '~/utils/permissions'
 import type { User } from '~/types/api'
 
 function user(role: 'Admin' | 'Member'): User {
@@ -18,5 +18,8 @@ describe('multi-user UI guards', () => {
     expect(canCreateProjects(user('Member'))).toBe(false)
     expect(canApproveGates(user('Member'))).toBe(false)
     expect(canApproveGates(null)).toBe(false)
+    expect(canImport(user('Admin'))).toBe(true)
+    expect(canImport(user('Member'))).toBe(false)
+    expect(canImport(null)).toBe(false)
   })
 })
