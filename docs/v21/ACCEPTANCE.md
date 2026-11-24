@@ -194,6 +194,10 @@ PR #5 被 ChatGPT 判為 Conditional NO-GO；以下每一項都在本分支修�
 
 **登入節流**：程式與文件一致（同一 email 10 分鐘內失敗 5 次 → 429；`v2/README.md` Security policy 表與 §2 都這樣寫）。**Review Desk 的純人工 Gate** 也要求 ≥20 字理由（前端驗證＋API 驗證）。**需求編號**依正式決策維持專案內唯一，沒有新增 migration。
 
+### 獨立審查紀錄
+
+完整審查結論與逐項對照在 **`docs/v21/REVIEW-LOG.md`**（T74/T74b/T74c/T74d、T76/T76b、T77、T78）。每一項都附「修正前失敗的測試名稱 → 修正後通過」，以及 migration 與資料保留的驗證方式。
+
 ## 8.1 GitHub 交付（Draft PR #5）
 
 - PR：**https://github.com/JingFeng-code/AstraDraupnir/pull/5**（Draft、base `main`、head `auto/p7-draupnir-v21`）。
