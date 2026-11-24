@@ -33,12 +33,24 @@ Changed after the review: the first draft used a monospace face for codes and ta
 | | A: 日誌 (the ledger) | B: 審查桌 (the review desk) | C: 結構圖 (the trace map) |
 |---|---|---|---|
 | Organizing idea | Time. One stream of what happened and what is waiting, grouped by day | Decision. A queue of what needs the owner, with the evidence and the consequence next to it | Structure. Five lanes from requirement to decision, items linked by what they depend on |
-| Home | Stream across all projects with a "needs you" band on top | Inbox of decisions, blocks and failures; first item open | Portfolio map: one row per project, lanes filled by real counts |
-| Project | The project's own stream plus requirements grouped with their threads | A brief: health, open queue, requirement coverage | The project's lane map |
+| Home | Stream across all projects with a "needs you" band on top | Inbox of decisions, blocks and failures; first item open | Map of every live work item against the five lanes |
+| Project | The project's own stream plus requirements grouped with their threads | Filterable table with a side panel for operations and the chain | The project's lane map with a drawer |
 | Work item | A page with a status path, dependencies and a log of its runs and evidence | A side panel that shows only the moves that are allowed and why the others are not | Select a node: a drawer with the thread and the actions |
-| Agents | Who is doing what now, then each agent's recent runs | A table of runs with verdict and attempts | One swimlane per agent over time |
+| Agents | Who is doing what now, then each agent's recent runs | A table of runs with the selected run's chain beside it | One swimlane per agent, recent runs in time order |
 | Gate | Decision card inline in the stream | The main workflow: evidence read, consequence shown, then decide (keyboard: j/k, a/r) | The gate as a node: its chain and what it unblocks in a dialog |
 | Best for | Reading the story; low effort at the end of the day | Clearing decisions fast | Seeing why something is stuck; planning |
 | Risk | Slow to scan many projects | Weak at seeing the whole | Dense on small screens |
 
 Mature basics stay everywhere: familiar lists, filters, a status menu, confirmation before a decision, undo for status changes, keyboard operation, visible focus.
+
+## Status of this prototype (V2.1 lab)
+- Run on port 3101 with the separate `draupnir_design` database and API on 5081. The V2 acceptance environment (PostgreSQL 55432, API 5080, Web 3000) is untouched.
+- Every direction has the five views, light and dark, and was checked with Playwright: screenshots, axe (WCAG 2 A/AA, serious and critical), horizontal-overflow check. Rounds 1 to 3 per direction are in `acceptance/screens/draupnir-design/{a,b,c}/round*/`.
+- Fixes made across rounds: a CSS specificity bug that stripped styles from buttons and spacing, ARIA table structure in C, mobile overflow in A, duplicated text in the trace, jargon (internal ids, test-data marker repeated in titles), missing agent attribution in the source data.
+- Test data: items titled with the 測試資料 marker (and shown with a badge) exist only so every state is visible; all other rows come from the real Astra delivery records.
+- Not done on purpose: the existing product is not redesigned and nothing is written into AstraBookOfThoth until a direction is chosen.
+
+## Independent review outcome
+Reviewed by an agent that did not design (report: `acceptance/DESIGN-LAB-INDEPENDENT-REVIEW.md`, evidence = screenshots). Ranking: B first, C second, A third.
+Fixed afterwards: B agents result badge wrapping and clipped column; C mobile map unusable; C gate shown without its decision flow (dialog now screenshotted, `c/round6/gate-dialog-light.png`); A warm beige callout (now neutral surface); A repeated "verified, 0 work items" lines; slashed zero digits.
+Still open (design choices for the owner, not bugs): all three share one palette so Astra identity is modest (wordmark plus the five-station glyph); A's gate page stacks several live approve/reject pairs.

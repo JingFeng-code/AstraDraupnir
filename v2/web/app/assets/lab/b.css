@@ -65,11 +65,12 @@ html[data-lab='b'] body { font-size: 14px; line-height: 1.5; }
 
 /* tables */
 .b-table { width: 100%; border-collapse: collapse; }
+.b-table td:last-child, .b-table th:last-child { white-space: nowrap; }
 .b-table th { text-align: left; font-size: 12px; font-weight: 700; color: var(--ink-3); padding: 8px 12px; border-bottom: 1px solid var(--line-strong); position: sticky; top: 0; background: var(--bg); }
 .b-table td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .b-table tr[data-row]:hover { background: var(--surface); cursor: pointer; }
 .b-table tr.is-on { background: var(--raised); box-shadow: inset 3px 0 0 var(--ink); }
-.b-chip { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; min-height: 24px; border-radius: var(--r-1); font-size: 12px; font-weight: 600; background: var(--idle-bg); color: var(--ink); }
+.b-chip { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; min-height: 24px; border-radius: var(--r-1); font-size: 12px; font-weight: 600; background: var(--idle-bg); color: var(--ink); }
 .b-chip.is-fix { background: var(--fix-bg); } .b-chip.is-move { background: var(--move-bg); } .b-chip.is-need { background: var(--need-bg); } .b-chip.is-fault { background: var(--fault-bg); }
 .b-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .b-filters button { padding: 3px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-1); font-size: 13px; background: var(--raised); }

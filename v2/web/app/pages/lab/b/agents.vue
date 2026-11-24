@@ -25,13 +25,12 @@ const chip = (t: Tone) => ({ proven: 'is-fix', moving: 'is-move', needs: 'is-nee
         <button v-for="a in lab.agents.value" :key="a.name" type="button" :aria-pressed="who === a.name" @click="who = a.name">{{ a.name }}<template v-if="a.live.length"> ({{ a.live.length }} 進行中)</template></button>
       </div>
       <table class="b-table">
-        <thead><tr><th scope="col">Agent</th><th scope="col">任務</th><th scope="col">結果</th><th scope="col">次數</th></tr></thead>
+        <thead><tr><th scope="col">Agent</th><th scope="col">任務</th><th scope="col">結果</th></tr></thead>
         <tbody>
           <tr v-for="r in runs" :key="r.id" data-row :class="{ 'is-on': r.id === selId }" :aria-selected="r.id === selId" @click="selId = r.id">
             <td><button type="button" class="lab-link" style="font-weight: 600" @click.stop="selId = r.id">{{ r.agent }}</button></td>
-            <td>{{ r.workItemId && lab.byId.value.items.get(r.workItemId) ? clean(lab.byId.value.items.get(r.workItemId)!.title) : r.externalTaskId }}<small style="display: block; color: var(--ink-2)">{{ ago(r.finishedAt ?? r.startedAt) }}</small></td>
+            <td>{{ r.workItemId && lab.byId.value.items.get(r.workItemId) ? clean(lab.byId.value.items.get(r.workItemId)!.title) : r.externalTaskId }}<small style="display: block; color: var(--ink-2)">第 {{ r.attempt }} 次，{{ ago(r.finishedAt ?? r.startedAt) }}</small></td>
             <td><span class="b-chip" :class="chip(runTone(r.status))"><LabMark :tone="runTone(r.status)" :size="11" />{{ RUN_LABEL[r.status] ?? r.status }}</span></td>
-            <td>{{ r.attempt }}</td>
           </tr>
         </tbody>
       </table>

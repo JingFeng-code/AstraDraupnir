@@ -38,8 +38,8 @@ const threadFor = (list: WorkItem[]): Trace | null => (list[0] ? lab.traceOf(lis
           <span class="a-req-code">{{ r.code }}</span>
           <div>
             <p class="a-req-t">{{ r.title }}</p>
-            <p class="a-req-m">{{ REQ_LABEL[r.status] }}，對應 {{ itemsOf(r.id).length }} 個工作項目
-              <template v-if="itemsOf(r.id)[0]">，例如 <NuxtLink :to="`/lab/a/w/${itemsOf(r.id)[0]!.id}`" class="a-link" style="font-weight: 500">{{ itemsOf(r.id)[0]!.title }}</NuxtLink></template>
+            <p class="a-req-m">{{ REQ_LABEL[r.status] }}<template v-if="itemsOf(r.id).length">，{{ itemsOf(r.id).length }} 個工作項目
+              <template v-if="itemsOf(r.id)[0]">，例如 <NuxtLink :to="`/lab/a/w/${itemsOf(r.id)[0]!.id}`" class="a-link" style="font-weight: 500">{{ itemsOf(r.id)[0]!.title }}</NuxtLink></template></template>
             </p>
           </div>
           <LabTrace v-if="threadFor(itemsOf(r.id))" :trace="threadFor(itemsOf(r.id))!" compact />

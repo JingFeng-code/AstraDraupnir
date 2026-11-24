@@ -32,7 +32,7 @@ html[data-lab='a'] .a-shell { display: grid; grid-template-columns: 236px minmax
 .a-aside h2 { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
 
 /* the "needs you" band: the one place the ledger raises its voice */
-.a-need { background: color-mix(in srgb, var(--need) 9%, var(--bg)); border-left: 3px solid var(--need); border-radius: 0 var(--r-1) var(--r-1) 0; padding: 14px 18px 12px; margin-bottom: 36px; }
+.a-need { background: var(--surface); border-left: 3px solid var(--need); border-radius: 0 var(--r-1) var(--r-1) 0; padding: 14px 18px 12px; margin-bottom: 36px; }
 .a-need h2 { display: flex; align-items: center; gap: 8px; font-size: var(--s-15); font-weight: 700; color: var(--need); margin-bottom: 6px; }
 .a-need li { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 7px 0; border-top: 1px solid color-mix(in srgb, var(--need) 22%, transparent); }
 .a-need li:first-of-type { border-top: 0; }

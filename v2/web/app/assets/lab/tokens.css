@@ -42,6 +42,7 @@ html[data-lab] body {
   font-size: var(--s-15);
   line-height: 1.55;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: 'zero' 0;
   -webkit-font-smoothing: antialiased;
 }
 :where(html[data-lab]) :where(h1, h2, h3, h4, p, ul, ol, dl, dd, figure) { margin: 0; }
