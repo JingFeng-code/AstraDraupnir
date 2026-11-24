@@ -6,7 +6,7 @@
 
 ## 0. 一句話結論
 
-Draupnir V2.1 已在本機完成可實際使用的產品交付：Direction D 工作空間（總覽／審查與決策／追溯與品質／Agent／專案＋八個專案子頁／使用者與權限／稽核紀錄／系統設定），含 Admin/Member 權限、Human Gate 證據規則（**前端與後端都強制**）、Supervisor 與 Spool 匯入、Stylus 交付報告、深淺主題與 390px 行動版。**未推送、未部署**：GitHub 交付分支與 Draft PR 已備妥，等你授權 push（見 §8）。本機預覽維持在 `http://127.0.0.1:3201`。
+Draupnir V2.1 已在本機完成可實際使用的產品交付：Direction D 工作空間（總覽／審查與決策／追溯與品質／Agent／專案＋八個專案子頁／使用者與權限／稽核紀錄／系統設定），含 Admin/Member 權限、Human Gate 證據規則（**前端與後端都強制**）、Supervisor 與 Spool 匯入、Stylus 交付報告、深淺主題與行動版（E2E 以 360px 執行，嚴格於要求的 390px）。**Draft PR #5 已建立**（未合併、未部署；本輪修正後需要一次明確 push 授權才能更新遠端分支，見 §8）。本機預覽維持在 `http://127.0.0.1:3201`。
 
 ## 1. 本機啟動（可重現）
 
@@ -65,17 +65,17 @@ PASS = 我（Tech Lead）在最終 commit 上實際跑過並看到結果；測�
 | A-08 | Bug 類型＋S1–S4 嚴重度（表單、表格、看板、篩選、排序） | PASS | API：`type=Bug, severity=S2` 建立、`?type=Bug` 篩選回 1 筆；`workItemForm.test.ts` |
 | A-09 | 相依性：加入／移除；相依未完成時不能 Done | PASS | API：加相依 201、B→Done 409、A Done 後 B→Done 200；`board.test.ts` |
 | A-10 | Blocked 必須有原因 | PASS | API：無 reason 400（`errors.reason`）、有 reason 200 |
-| A-11 | Sprint／Milestone：建立、編輯、單一 Active Sprint | PASS | API：Sprint 201、第二個 Active 409；Milestone 201；E2E |
+| A-11 | Sprint／Milestone：建立、編輯、單一 Active Sprint | PARTIAL | API：Sprint 201、第二個 Active 409、Milestone 201；E2E 驗 Sprint 建立／指派／進度與編輯。**Milestone 的 UI 建立／編輯未逐一操作**（只驗 API 與顯示） |
 | A-12 | 搜尋、篩選、側邊欄收合、Ctrl+K | PASS | `a11y-keyboard.spec.ts`（跳至主要內容、Ctrl+K、側邊欄記憶） |
 | A-13 | Agent 執行紀錄：Supervisor 匯入，標示快照與記錄時間 | PASS | API 匯入 `{agentRuns:3, evidence:0, reviews:0, gates:1}`；UI「匯入快照，不是即時連線」＋「記錄時間」 |
-| A-14 | 證據與審查：列表、篩選、連到工作項目 | PASS | Spool 證據寫入後 `GET …/spool-results` 1 筆；`evidence.vue`＋`spoolEvidence.test.ts` |
+| A-14 | 證據與審查：列表、篩選、連到工作項目 | PARTIAL | Spool 證據寫入後 `GET …/spool-results` 1 筆、篩選與畫面渲染已驗；**「證據→工作項目」的連結點擊沒有自動化斷言**（只檢查了目標 href/渲染） |
 | A-15 | 五階段追溯鏈 | PASS | `/trace` 頁；`UiChain`；截圖 `trace-*` |
 | A-16 | Human Gate：必要證據、人工例外、Admin only、不同步 Supervisor | PASS | 後端 `GateRules`（本次新增，31 API 測試）；UI 實測：缺證據時「缺少必要證據」、**沒有直接核准鈕**、只有人工例外、且顯示「只記錄在 Draupnir」；`evidenceRules.test.ts` |
 | A-17 | Gate 駁回記錄 | PASS | API：`approved:false` → `Rejected` + note；稽核 `gate.decision` |
 | A-18 | 稽核紀錄：登入、建立/更新、Gate 決定 | PASS | `auth.login` / `auth.login.failed`（未知信箱用 nullable actor，不記密碼）/ `auth.logout` / `project.create|update|archive` / `supervisor.import` / `spool.import` / `report.generate` / `gate.create|decision` / `user.create|update` / `membership.add|remove` / `dependency.add|remove`；`ApiIntegrationTests.AuditRecordsAuthAndCrudWithoutSecrets`；UI 只回最近 200 筆（明示） |
 | A-19 | 交付報告：產生、看 Markdown、下載 Stylus YAML、實際開啟 | PASS | API markdown 200（291 bytes）、stylus.yaml 200（1,269 bytes）；Stylus CLI 渲染 DOCX exit 0、`quality verify-content` exit 0（`ok:true`） |
 | A-20 | 重啟後資料仍在 | PASS | 重啟 API 後同一個專案／Spool 證據仍可讀 |
-| A-21 | 深淺主題、1440 與 390、無水平捲動 | PASS | 我方 8 頁 × 2 主題：overflow 0；既有 36 組整合截圖 0 axe/overflow |
+| A-21 | 深淺主題、1440 與 360（要求 390，測試更嚴格）、無水平捲動 | PASS | 8 頁 × 2 主題：overflow 0；36 組整合截圖＋T73 56×2 views 0 axe/overflow；E2E viewport 1280 與 360 |
 | A-22 | V2 回歸：原交付 E2E 仍通過 | PASS | `npm run test:e2e` → **22 passed**（我獨立重跑，隔離 DB） |
 | A-23 | 測試資料標記 | PASS | `isTestData` + `ui-tag is-test`（agents/index/UiChain/WorkItemBoard）；**驗收 E2E 建立的資料全部以「測試資料」開頭**（T74c 發現後修正，`64eca5c`），且只在可拋棄的 DB 上執行 |
 
@@ -139,10 +139,10 @@ npm run test:e2e
 | 項目 | 指令 | 結果 |
 |---|---|---|
 | API build | `dotnet build --no-restore` | 0 warnings / 0 errors |
-| API tests | `dotnet test --no-restore`（隔離 DB，自動建立／刪除 `draupnir_test_<guid>`） | **36 passed / 0 failed**（T75 後 36 個測試；每個測試自建／自刪 `draupnir_test_<guid>`） |
+| API tests | `dotnet test --no-restore`（隔離 DB） | **40 passed / 0 failed**（每個測試自建、自刪 `draupnir_test_<guid>`） |
 | Web typecheck | `npx nuxt typecheck` | exit 0 |
-| Web unit/component | `npx vitest run` | **48 passed / 0 failed**（T75 後 12 個檔案） |
-| E2E（桌面＋390px，真實 API + PostgreSQL） | `E2E_ALLOW_WRITE=1 … npm run test:e2e` | **26 passed**（T75 guard 開啟）（delivery + acceptance + a11y-keyboard；桌面＋390px，40.5 秒） |
+| Web unit/component | `npx vitest run` | **48 passed / 0 failed**（12 檔案） |
+| E2E（桌面 1280＋行動 360，真實 API + PostgreSQL） | `E2E_ALLOW_WRITE=1 E2E_STATE_DIR=… npm run test:e2e` | **26 passed**（fail-closed 寫入保護開啟；delivery + acceptance + a11y-keyboard） |
 | Stylus 報告 | `astra-stylus render … --format docx` + `quality verify-content` | exit 0 / `ok:true` |
 | 截圖＋axe＋overflow | `product-shots.cjs`（T70/T71/T72/integration/T73） | T73 兩輪各 **56 views** ＋整合 36 views；所有視圖 **0 serious/critical axe、0 水平溢出、0 頁面錯誤**，0 serious/critical axe、0 水平溢出 |
 
@@ -157,13 +157,36 @@ npm run test:e2e
 | D-07 Gate 可能被舊 attempt 的 Fail 永久卡住、無法稽核決策當時證據 | 只檢查全部證據與當下結果 | `GateRules.Evaluate` 取最新 attempt、排除 stale、`EvidenceSnapshot` | 6 個 Gate API 測試：missing／Fail／Changes／NotTested／Blocked／例外／stale／舊 Fail→新 Pass |
 | D-08 無工作項目 Gate 可空白核准；E2E 可誤寫 preview | 沒有理由要求；E2E 沒有寫入保護 | ≥20 字理由＋稽核；health／opt-in fail-closed guard | `GateManualException...`、`e2eGuard.test.ts`、實際 E2E 26 passed |
 
-## 8. GitHub 交付（等你授權 push）
+## 8. ChatGPT 複審修正（第二輪）
 
-- 目標：`https://github.com/JingFeng-code/AstraDraupnir`，基準 `main`（`1a3ff21`）。
-- 交付分支：`auto/p7-draupnir-v21`（領先 main 29 個 commit；工作樹乾淨）。
-- Draft PR：**待你授權 push 後建立**（分支已備妥）（**尚未建立**，需要你明確授權 push）。
-- 檢查結果：沒有 `.github/workflows`（無 push 觸發的 CI／部署費用）；沒有 tracked `.env`；diff 內沒有 token／金鑰／私鑰／私路徑（只有測試用的假密碼與本機開發用預設帳密，README 已說明要覆寫）。
-- 禁止事項遵守：不改 main、不 force push、不自動 merge、不部署、不產生費用。
+PR #5 被 ChatGPT 判為 Conditional NO-GO；以下每一項都在本分支修正，並有「修正前失敗 → 修正後通過」的測試證據（完整紀錄見 `.astra-runs/.../evidence/T75-fix-round-pi.md` 與 `T76`）。
+
+| Finding | 重現 | 根因 | 修正 | 測試證據 |
+|---|---|---|---|---|
+| **F-01** Member 可封存專案（High） | 是：Member `PUT /projects/{id}` 帶 `status:"Archived"` 回 200 | PUT 直接綁定整個 `Project` 實體（含 Status） | 專用 `ProjectUpdateInput`（key/name/description/repoPath + 可選 status），Status 變更只有 Admin；DTO 不含 id/createdAt | 修正前：`Expected Forbidden, Actual OK`；修正後 `ProjectStatusCanOnlyBeChangedByAnAdmin`（Member 改名 200、封存/解除封存 403、Admin 封存/解除 200） |
+| **F-02** 最後一位 Admin 競態（High） | 是：兩個並行停用請求都回 200 → 0 位有效 Admin | 檢查與更新不在同一交易 | 同一個 `SERIALIZABLE` 交易內檢查並更新；競爭者提交時失敗 → 409 | 修正前：`Assert.Contains Filter not matched`（兩個都成功）；修正後 `ConcurrentDemotionsCannotRemoveTheLastActiveAdministrator`（至少一個非 2xx、至少一位有效 Admin） |
+| **F-03** Supervisor 匯入身份碰撞（High） | 是：同一 `TASK-001` 匯入第二個來源回 409／覆蓋 | 唯一鍵與查詢只有 `Source + ExternalTaskId + Attempt`，沒有來源實例 | 新增 `AgentRun.SourceInstance`，唯一索引改為含它；匯入查詢、migration（additive＋backfill）與文件同步 | `F03SameTaskIdInTwoSourceInstancesStaysSeparate`（修正前 409 → 修正後兩個來源各自獨立、同來源重匯仍冪等） |
+| **F-04** Gate 證據完整性（Medium） | 是（語意未定義） | 只認「有沒有 Pass」，沒有最新 attempt、Blocked/NotTested、過期證據的規則，也沒有決策快照 | 明確規則：只採每個來源最新 attempt、Blocked/NotTested 不算通過、過期證據不得單獨放行；無工作項目的 Gate 必須寫 ≥20 字理由；決策時把評估結果存成 `EvidenceSnapshot`；人工例外權限沒有放寬 | `GateEvidenceIntegrity*` 與 `GateOnAWorkItem*` 的 API 整合測試（缺少/失敗/要求修改/只有 NotTested/Blocked/過期 → 400；最新重試 Pass → 200；例外或無工作項目有理由 → 200 並存快照） |
+| **F-05** E2E 寫入保護（Medium） | 是：原本任何 `NUXT_API_BASE` 都會寫資料 | 沒有 fail-closed 檢查 | `E2E_ALLOW_WRITE=1` ＋ loopback ＋ `E2E_STATE_DIR` ＋ `/api/health` 回報 `disposable:true` 才放行；DB 名稱若是 `draupnir`/`draupnir_v21`/`draupnir_design` 一律拒絕 | 對 preview（`draupnir_v21`）：`E2E 寫入保護：拒絕在非拋棄式資料庫 draupnir_v21 上寫入`，exit 1；未設 `E2E_ALLOW_WRITE` 也 exit 1（都在第一次寫入前） |
+
+### 安全補強（本輪）
+
+- **改密碼／改角色立即撤銷 session**：`User.SecurityStamp` 是 cookie claim，任何使用者變更都輪替；`Access.Current` 與 `/api/auth/me` 不接受過期或缺少 stamp 的 cookie。測試：改密碼後舊 client 401、重新登入 200、改角色後再 401。
+- **Cookie 絕對期限**：`ExpireTimeSpan = 8h`、`SlidingExpiration = false`。
+- **登入節流**：同一 email 10 分鐘內失敗 5 次 → 429（以 audit 記錄計算，成功登入不受影響）。
+- **本機 vs 正式政策**：`v2/README.md` 的 “Security policy” 表（TLS/Secure、secret manager、OpenAPI、SSO/MFA、IP 層限流）。
+- **已公開的舊本機密碼**：`draupnir`、`draupnir_design`、`draupnir_v21` 三個環境都已驗證失效（舊密碼 401、新密碼 200）；repo 與 PR 不含任何密碼。
+
+### 需求編號唯一性（本輪結論）
+
+`Requirement.Code` 的格式是 `REQ-n`，唯一性範圍是**同一專案內**（DB 唯一索引 `(ProjectId, Code)`，重複回 409）；不同專案可以各自有 `REQ-1`。E2E 已改用隨機 `REQ-<6 位數>`，不會再撞號。**若你要的是全域唯一（跨專案也不能重號）**，那是一次資料模型變更（需要 migration 改寫既有編號成 `<KEY>-REQ-n`），本輪先以文件與測試明確界定現行語意，請在複審時裁決是否要改。
+
+## 8.1 GitHub 交付（Draft PR #5）
+
+- PR：**https://github.com/JingFeng-code/AstraDraupnir/pull/5**（Draft、base `main`、head `auto/p7-draupnir-v21`）。
+- 遠端分支：`https://github.com/JingFeng-code/AstraDraupnir/tree/auto/p7-draupnir-v21`。
+- 本輪（ChatGPT 複審修正）尚未推送：等一次明確的 push 授權後，以 fast-forward 更新同一個分支與同一張 Draft PR（不另開 PR、不合併、不部署、不 force push）。
+- 檢查結果：沒有 `.github/workflows`（無 push 觸發的 CI／部署費用）；沒有 tracked `.env` 或建置產物；diff 內沒有 token／金鑰／私鑰／私路徑。
 
 ## 9. 尚未完成／已知限制
 
@@ -183,7 +206,7 @@ npm run test:e2e
 - 專案總覽的成員／權限面板在窄螢幕的呈現優化。
 - `/lab` 移除或 `noindex`；把設計決策搬進 ADR。
 - 深色主題下少數標籤對比再檢查（T70 已修一輪，持續監看）。
-- 表格在 390px 的密度與「展開列」互動。
+- 表格在 360–390px 的密度與「展開列」互動。
 - 登入頁的錯誤訊息與 rate-limit 提示。
 - ~~沒有 `workItemId` 的 Gate 要求最低理由~~（T75 已修）。
 - 把證據關聯改成「WorkItemId 或該工作項目的 agent run」單一規則（T74b B-01）。
@@ -191,6 +214,6 @@ npm run test:e2e
 
 ## 11. 截圖索引
 
-- 整合驗收（36 組：overview / project / projects / requirements / work-items / reports / users / audit / settings × 深淺 × 1440/390）：`acceptance/screens/draupnir-v21/integration/roundfinal/`
+- 整合驗收（36 組：overview / project / projects / requirements / work-items / reports / users / audit / settings × 深淺 × 1440/360）：`acceptance/screens/draupnir-v21/integration/roundfinal/`
 - 各工作包：`T70/round4`、`T71/round2`、`T72/round2`、`T73/`（本次）
 - 本文件引用的兩張代表圖：`docs/v21/screens/overview-dark.png`、`overview-light.png`
