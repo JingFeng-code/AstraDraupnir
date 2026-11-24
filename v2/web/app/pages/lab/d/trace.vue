@@ -4,8 +4,10 @@ import { STOP_STATE_LABEL } from '~/utils/lab'
 definePageMeta({ layout: 'lab-d' })
 const lab = useLab()
 const scope = ref<'live' | 'all'>('live')
-const items = computed(() => lab.data.value.items.filter(i => scope.value === 'all' || i.status !== 'Done')
+const all = computed(() => lab.data.value.items.filter(i => scope.value === 'all' || i.status !== 'Done')
   .sort((a, b) => Number(b.status === 'Blocked') - Number(a.status === 'Blocked') || a.code.localeCompare(b.code)))
+const showAll = ref(false)
+const items = computed(() => (showAll.value ? all.value : all.value.slice(0, 12)))
 const selId = ref('')
 const sel = computed(() => items.value.find(i => i.id === selId.value))
 const doneCount = computed(() => lab.data.value.items.filter(i => i.status === 'Done').length)
@@ -23,7 +25,8 @@ const doneCount = computed(() => lab.data.value.items.filter(i => i.status === '
       <button type="button" class="d-btn" :class="{ 'is-primary': scope === 'all' }" :aria-pressed="scope === 'all'" @click="scope = 'all'">全部 {{ lab.data.value.items.length }}</button>
     </div>
     <div class="d-split" :class="sel ? 'is-2r' : ''">
-      <section class="d-panel" style="overflow-x: auto"><LabDMap v-model="selId" :items="items" show-project /></section>
+      <section class="d-panel" style="overflow-x: auto"><LabDMap v-model="selId" :items="items" show-project />
+        <div v-if="all.length > items.length" style="padding: 14px 18px"><button type="button" class="d-btn" @click="showAll = true">顯示其餘 {{ all.length - items.length }} 項</button></div></section>
       <aside v-if="sel" class="d-panel d-sticky" style="padding: 22px" aria-label="選取的工作項目">
         <LabDOps :item="sel" />
         <NuxtLink :to="`/lab/d/w/${sel.id}`" class="d-btn" style="margin-top: 16px; width: 100%">開啟完整追溯</NuxtLink>

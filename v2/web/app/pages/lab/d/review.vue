@@ -78,6 +78,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <div v-if="ev" class="d-callout" :class="ev.state === 'satisfied' ? 'is-ok' : ev.state === 'manual' ? '' : 'is-fault'" style="margin-top: 18px">
             <p class="d-h3" style="display: flex; gap: 8px; align-items: center"><LabMark :tone="ev.state === 'satisfied' ? 'proven' : ev.state === 'manual' ? 'idle' : 'fault'" :size="16" />{{ ev.headline }}</p>
             <ul class="d-check"><li v-for="c in ev.checks" :key="c.label"><LabMark :tone="c.ok ? 'proven' : 'fault'" :size="14" /><span>{{ c.label }}，{{ c.detail }}</span></li></ul>
+            <h4 class="d-h3" style="margin-top: 6px">已有的證據</h4>
+            <p v-if="!trace || !(trace.evidence.length || trace.reviews.length)" class="d-meta">沒有任何證據或審查紀錄。</p>
+            <ul v-else class="d-meta"><li v-for="e in trace.evidence" :key="e.id">{{ clean(e.title) }}，{{ e.result === 'Pass' ? '通過' : e.result === 'Fail' ? '失敗' : '尚未測試' }}</li><li v-for="rv in trace.reviews" :key="rv.id">{{ rv.reviewer }} 審查：{{ rv.verdict === 'Pass' ? '通過' : '要求修改' }}</li></ul>
             <p class="d-meta">判斷規則由設計環境推導，不是 Supervisor 的定義。</p>
           </div>
 
@@ -92,7 +95,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         <div v-if="sel" class="d-panel-b d-stack">
           <template v-if="gate && ev">
             <div>
-              <h3 class="d-h3" style="margin-bottom: 6px">核准後會發生什麼</h3>
+              <h3 class="d-h3" style="margin-bottom: 6px">放行後會發生什麼</h3>
               <ul v-if="unblocks.length"><li v-for="u in unblocks.slice(0, 5)" :key="u.id" style="display: flex; gap: 10px; padding: 4px 0"><LabMark :tone="STATUS_TONE[u.status]" :size="14" /><span>{{ clean(u.title) }}，現在{{ STATUS_LABEL[u.status] }}</span></li></ul>
               <p v-else class="d-meta">沒有被追蹤的工作在等這個決定。核准或駁回只會記錄在設計資料庫，系統不會自動動作。</p>
             </div>

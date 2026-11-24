@@ -10,7 +10,8 @@ const trouble = computed(() => lab.attention.value.filter(a => a.kind !== 'gate'
 const active = computed(() => d.value.items.filter(i => i.status === 'InProgress' || i.status === 'InReview').length)
 const filter = ref<'all' | 'moving' | 'proven' | 'problem'>('all')
 const FILTERS = [['all', '全部'], ['moving', '進行中'], ['proven', '已完成'], ['problem', '有問題']] as const
-const events = computed(() => lab.events.value.filter(e => filter.value === 'all' || (filter.value === 'problem' ? e.tone === 'fault' || e.tone === 'needs' : e.tone === filter.value)).slice(0, 40))
+const more = ref(false)
+const events = computed(() => lab.events.value.filter(e => filter.value === 'all' || (filter.value === 'problem' ? e.tone === 'fault' || e.tone === 'needs' : e.tone === filter.value)).slice(0, more.value ? 60 : 12))
 const groups = computed(() => {
   const out: { day: string, rows: typeof events.value }[] = []
   for (const e of events.value) {
@@ -22,7 +23,6 @@ const groups = computed(() => {
   return out
 })
 const lastRecord = computed(() => clock(newest(d.value.runs.map(r => r.finishedAt ?? r.startedAt))))
-const hm = (iso: string) => new Date(iso).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })
 const traceFor = (id: string | null) => { const i = id ? lab.byId.value.items.get(id) : null; return i ? lab.traceOf(i) : null }
 const progress = (pid: string) => {
   const its = d.value.items.filter(i => i.projectId === pid)
@@ -58,12 +58,13 @@ const agentRows = computed(() => lab.agents.value.map(a => ({ ...a, last: newest
             <LabMark :tone="e.tone" :size="18" :label="e.verb" />
             <div style="min-width: 0; flex: 1">
               <p class="d-row-t">{{ agentName(e.agent) }} {{ e.verb }} {{ clean(e.title) }} <span v-if="isTestData(e.title)" class="d-tag is-test">測試資料</span></p>
-              <p class="d-row-m">{{ projectOf(d.projects, e.projectId)?.name ?? '未歸屬專案' }}，{{ hm(e.at) }}，來源 Supervisor 匯入</p>
+              <p class="d-row-m">{{ projectOf(d.projects, e.projectId)?.name ?? '未歸屬專案' }}，紀錄時間 {{ clock(e.at) }}，來源 Supervisor 匯入</p>
             </div>
             <LabDThread v-if="traceFor(e.itemId)" :trace="traceFor(e.itemId)!" />
           </NuxtLink>
         </template>
         <p v-if="!groups.length" class="d-empty">這個篩選條件下沒有事件。</p>
+        <div v-else-if="!more" style="padding: 14px 22px 20px"><button type="button" class="d-btn" @click="more = true">顯示更多</button></div>
       </section>
 
       <div class="d-stack" style="gap: 24px">

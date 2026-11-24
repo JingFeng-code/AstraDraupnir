@@ -30,14 +30,14 @@ const unknownCount = computed(() => lab.data.value.runs.filter(r => r.agent === 
           <select v-model="who" class="d-input"><option value="all">全部</option><option v-for="a in lab.agents.value" :key="a.name" :value="a.name">{{ agentName(a.name) }}</option></select></label>
       </div>
       <table class="d-table">
-        <thead><tr><th scope="col">Agent</th><th scope="col">工作</th><th scope="col">結果</th><th scope="col" class="d-hide-sm">次數</th><th scope="col">時間</th><th scope="col" class="d-hide-sm">來源</th></tr></thead>
+        <thead><tr><th scope="col">Agent</th><th scope="col">工作</th><th scope="col">結果</th><th scope="col" class="d-hide-sm">次數</th><th scope="col">紀錄時間</th><th scope="col" class="d-hide-sm">來源</th></tr></thead>
         <tbody>
           <tr v-for="r in runs.slice(0, 40)" :key="r.id" @click="r.workItemId && navigateTo(`/lab/d/w/${r.workItemId}`)">
             <td style="font-weight: 600">{{ agentName(r.agent) }}</td>
             <td class="d-wide">{{ itemOf(r.workItemId) ? clean(itemOf(r.workItemId)!.title) : r.externalTaskId }} <span v-if="itemOf(r.workItemId) && isTestData(itemOf(r.workItemId)!.title)" class="d-tag is-test">測試資料</span></td>
-            <td><LabDPill :tone="runTone(r.status)" :label="RUN_LABEL[r.status] ?? r.status" /></td>
+            <td><LabDPill :tone="runTone(r.status)" :label="r.status === 'DONE' ? '已完成' : `紀錄停在「${RUN_LABEL[r.status] ?? r.status}」`" /></td>
             <td class="d-hide-sm">{{ r.attempt }}</td>
-            <td style="white-space: nowrap">{{ ago(r.finishedAt ?? r.startedAt) }}</td>
+            <td style="white-space: nowrap">{{ clock(r.finishedAt ?? r.startedAt) }}</td>
             <td class="d-hide-sm"><span class="d-tag">{{ r.source }} 匯入</span></td>
           </tr>
         </tbody>
