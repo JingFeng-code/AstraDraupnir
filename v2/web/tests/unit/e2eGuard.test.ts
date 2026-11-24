@@ -8,9 +8,15 @@ const dirs: string[] = []
 function env(overrides: Record<string, string | undefined> = {}) {
   const state = fs.mkdtempSync(path.join(os.tmpdir(), 'draupnir-e2e-guard-'))
   dirs.push(state)
-  return { E2E_ALLOW_WRITE: '1', NUXT_API_BASE: 'http://127.0.0.1:5088', E2E_STATE_DIR: state, ...overrides }
+  return {
+    E2E_ALLOW_WRITE: '1',
+    NUXT_API_BASE: 'http://127.0.0.1:5088',
+    E2E_STATE_DIR: state,
+    E2E_EXPECTED_INSTANCE: 'instance-123',
+    ...overrides,
+  }
 }
-const health = { status: 'ok', database: 'draupnir_v21_fix2', disposable: true }
+const health = { status: 'ok', database: 'draupnir_v21_fix2', disposable: true, instance: 'instance-123' }
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
@@ -36,5 +42,11 @@ describe('E2E write guard', () => {
 
   it('refuses when the API cannot report a disposable database', () => {
     expect(() => assertSafeE2e(env(), undefined)).toThrow(/health/)
+  })
+
+  it('refuses a different or missing instance token', () => {
+    expect(() => assertSafeE2e(env(), { ...health, instance: 'foreign' })).toThrow(/instance/)
+    expect(() => assertSafeE2e(env(), { ...health, instance: undefined })).toThrow(/instance/)
+    expect(() => assertSafeE2e(env({ E2E_EXPECTED_INSTANCE: undefined }), health)).toThrow(/E2E_EXPECTED_INSTANCE/)
   })
 })

@@ -27,8 +27,8 @@ function trace(ev: Evidence[], rv: Review[] = [], runs: Trace['runs'] = [], upda
   return { stops: [], requirement: null, item: { ...item, updatedAt }, runs, evidence: ev, reviews: rv, gate }
 }
 
-const run = (id: string, attempt: number): Trace['runs'][number] => ({
-  id, projectId: 'p1', workItemId: 'w1', externalTaskId: 'T-1', sourceInstance: 'src', agent: 'Pi',
+const run = (id: string, attempt: number, taskId = 'T-1', sourceInstance = 'src'): Trace['runs'][number] => ({
+  id, projectId: 'p1', workItemId: 'w1', externalTaskId: taskId, sourceInstance, agent: 'Pi',
   model: 'test', sessionId: null, status: 'DONE', attempt, startedAt: null, finishedAt: null, source: 'Supervisor',
 })
 
@@ -60,6 +60,20 @@ describe('gate evidence rules', () => {
     const result = gateEvidence(gate, trace([
       evidence('Fail', 'r1'), evidence('Pass', 'r2'),
     ], [], [run('r1', 1), run('r2', 2)]))
+    expect(result.state).toBe('satisfied')
+    expect(result.canApprove).toBe(true)
+  })
+  it('does not collapse two tasks from the same source into one latest bucket', () => {
+    const result = gateEvidence(gate, trace([
+      evidence('Fail', 'r1'), evidence('Pass', 'r2'),
+    ], [], [run('r1', 1, 'TASK-A'), run('r2', 2, 'TASK-B')]))
+    expect(result.state).toBe('failed')
+    expect(result.canApprove).toBe(false)
+  })
+  it('aggregates the latest attempt of every task from the same source', () => {
+    const result = gateEvidence(gate, trace([
+      evidence('Fail', 'r1a'), evidence('Pass', 'r1b'), evidence('Pass', 'r2'),
+    ], [], [run('r1a', 1, 'TASK-A'), run('r1b', 2, 'TASK-A'), run('r2', 1, 'TASK-B')]))
     expect(result.state).toBe('satisfied')
     expect(result.canApprove).toBe(true)
   })

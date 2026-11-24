@@ -5,6 +5,7 @@ export interface GuardHealth {
   status: string
   database: string
   disposable: boolean
+  instance?: string | null
 }
 
 const loopback = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
@@ -42,6 +43,10 @@ export function assertSafeE2e(
   if (!loopback.has(url.hostname)) {
     throw new Error(`E2E 寫入保護：只允許 loopback API，收到 ${url.hostname}。`)
   }
+  const expectedInstance = env.E2E_EXPECTED_INSTANCE?.trim()
+  if (!expectedInstance) {
+    throw new Error('E2E 寫入保護：請設定 E2E_EXPECTED_INSTANCE，且 API 必須以同一個 E2E_INSTANCE_TOKEN 啟動。')
+  }
   if (!health) {
     throw new Error('E2E 寫入保護：API 沒有回報 /api/health，無法確認資料庫是否可拋棄；拒絕執行。')
   }
@@ -50,6 +55,9 @@ export function assertSafeE2e(
   }
   if (!health.disposable || ['draupnir', 'draupnir_v21', 'draupnir_design'].includes(health.database)) {
     throw new Error(`E2E 寫入保護：拒絕在非拋棄式資料庫 ${health.database} 上寫入。`)
+  }
+  if (!health.instance || health.instance !== expectedInstance) {
+    throw new Error('E2E 寫入保護：API instance 與 E2E_EXPECTED_INSTANCE 不一致；可能連到別的 API。')
   }
 }
 
