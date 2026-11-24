@@ -74,6 +74,9 @@ public static class DeliveryEndpoints
                 }),
                 counts = (evaluation?.UsedCounts ?? new Dictionary<EvidenceResult, int>())
                     .ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
+                latestCounts = (evaluation?.LatestCounts ?? new Dictionary<EvidenceResult, int>())
+                    .ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
+                staleCount = evaluation?.StaleEvidence.Count ?? 0,
                 usedEvidenceIds = evaluation?.UsedEvidence.Select(e => e.Id),
                 usedReviewIds = evaluation?.UsedReviews.Select(r => r.Id),
                 staleEvidenceIds = evaluation?.StaleEvidence.Select(e => e.Id),
