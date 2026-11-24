@@ -1,6 +1,6 @@
 # AstraDraupnir V2.1 — test summary
 
-對應程式最終 commit：**`bbbeb39`**（PR #5 分支 `auto/p7-draupnir-v21`；本輪 ChatGPT 複審修正後）。每次 push 後請以該分支的最新 commit 重跑。
+對應程式最終 commit：**`1c6e645`**（PR #5 分支 `auto/p7-draupnir-v21`；本輪 ChatGPT 複審修正後）。每次 push 後請以該分支的最新 commit 重跑。
 
 | 項目 | 指令 | 結果 |
 |---|---|---|
