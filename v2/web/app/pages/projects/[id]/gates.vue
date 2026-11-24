@@ -26,6 +26,7 @@ const dialogOpen = ref(false)
 const pending = ref<HumanGate | null>(null)
 const decision = ref<'approve' | 'reject'>('approve')
 const note = ref('')
+const needsManualReason = computed(() => !!pending.value && !pending.value.workItemId)
 const exceptionReason = ref('')
 const ack = ref(false)
 const typed = ref('')
@@ -47,6 +48,11 @@ function ask(gate: HumanGate, choice: 'approve' | 'reject') {
 }
 async function confirmDecision() {
   if (!pending.value) return
+  if (decision.value === 'approve' && !pending.value.workItemId && note.value.trim().length < 20) {
+    actionError.value = '沒有對應工作項目的 Gate 必須寫明至少 20 字的人工判斷理由。'
+    actionDetails.value = []
+    return
+  }
   try {
     await ws.decide(pending.value, decision.value === 'approve', note.value.trim())
     dialogOpen.value = false
@@ -164,7 +170,7 @@ async function createGate() {
     </div>
 
     <ConfirmDialog v-model:open="dialogOpen" :title="decision === 'approve' ? '批准這個 Human Gate？' : '駁回這個 Human Gate？'" :description="pending ? `「${pending.title}」的決定會立刻生效，且不能重複變更。` : ''" :confirm-label="decision === 'approve' ? '確認批准' : '確認駁回'" :tone="decision === 'approve' ? 'primary' : 'danger'" @confirm="confirmDecision">
-      <label for="gate-note" class="ui-meta" style="display: block; margin-top: 14px">備註（選填）</label><textarea id="gate-note" v-model="note" class="ui-field" style="min-height: 80px" data-testid="gate-note" />
+      <label for="gate-note" class="ui-meta" style="display: block; margin-top: 14px">{{ needsManualReason && decision === 'approve' ? '人工判斷理由（至少 20 字，必填）' : '備註（選填）' }}</label><textarea id="gate-note" v-model="note" class="ui-field" style="min-height: 80px" data-testid="gate-note" />
     </ConfirmDialog>
   </div>
 </template>

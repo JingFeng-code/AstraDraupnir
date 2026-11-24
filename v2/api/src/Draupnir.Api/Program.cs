@@ -52,6 +52,18 @@ app.Use(async (context, next) =>
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapOpenApi();
+// Anonymous, non-secret liveness/disposability marker for the E2E write guard.
+app.MapGet("/api/health", async (DraupnirDb db) =>
+{
+    var canConnect = await db.Database.CanConnectAsync();
+    var database = db.Database.GetDbConnection().Database ?? "";
+    var normalized = database.ToLowerInvariant();
+    var preview = normalized is "draupnir" or "draupnir_v21" or "draupnir_design";
+    var disposable = !preview && (normalized.StartsWith("draupnir_test_") ||
+        normalized.EndsWith("_e2e") || normalized.EndsWith("_test") ||
+        normalized.EndsWith("_fix2") || normalized.EndsWith("_accept"));
+    return Results.Ok(new { status = canConnect ? "ok" : "unavailable", database, disposable });
+});
 var api = app.MapGroup("/api").RequireAuthorization();
 
 api.MapPost("/auth/login", async (Login input, DraupnirDb db, IPasswordHasher<User> hasher, HttpContext context) =>

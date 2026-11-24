@@ -73,6 +73,8 @@ export interface WorkItem {
   dueDate: string | null
   severity: WorkItemSeverity | null
   blockedReason: string | null
+  /** ISO timestamp of the last server-side work-item update; absent on older payloads. */
+  updatedAt?: string | null
 }
 
 export interface Sprint {
@@ -103,6 +105,7 @@ export interface AgentRun {
   projectId: string | null
   workItemId: string | null
   externalTaskId: string
+  sourceInstance?: string
   agent: string
   model: string
   sessionId: string | null
@@ -148,6 +151,7 @@ export interface HumanGate {
   decidedBy: string | null
   decidedAt: string | null
   note: string | null
+  evidenceSnapshot?: unknown
 }
 
 export interface ReportSummary {
