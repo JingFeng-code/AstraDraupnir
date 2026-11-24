@@ -45,3 +45,54 @@ dotnet test --no-build --no-restore
 ~~~
 
 Integration tests use WebApplicationFactory and PostgreSQL. The test connection defaults to the local postgres maintenance database at port 55432. DRAUPNIR_TEST_POSTGRES overrides it. The integration test fixture creates, migrates, and removes its own draupnir_test_<guid> database. To include actual DOCX rendering in the report test, set DRAUPNIR_TEST_STYLUS_EXECUTABLE to a local Stylus executable.
+
+## Web（Nuxt 4）
+
+The web app lives in `v2/web`. It is a client-side Nuxt app; `/api/**` is proxied by the Nuxt server to the API (`NUXT_API_BASE`, default `http://127.0.0.1:5080`), so the browser keeps the session cookie on the same origin.
+
+~~~powershell
+cd v2/web
+npm install
+
+# Start the API on the port the web app proxies to (see the API section above for env vars).
+# In v2/api:
+#   dotnet run --project src/Draupnir.Api --no-build --no-restore -- --urls http://127.0.0.1:5080
+
+# Optional: point somewhere else when the API uses another port.
+$env:NUXT_API_BASE = 'http://127.0.0.1:5080'
+npm run dev          # http://localhost:3000
+~~~
+
+Sign in with `DRAUPNIR_ADMIN_EMAIL` / `DRAUPNIR_ADMIN_PASSWORD` configured for the API process.
+
+Pages: login, project list, project dashboard, requirements, work items (table and drag/keyboard Kanban), sprints and milestones, agent runs, evidence and reviews, human gates (approval/rejection requires a confirmation dialog), delivery reports (Markdown view and Stylus YAML download), and Supervisor import. All UI text is Traditional Chinese. Loading, empty, and error states are implemented; `409`/`400` ProblemDetails are mapped to readable Chinese messages, and `401` redirects to the login page.
+
+### Web checks
+
+~~~powershell
+cd v2/web
+npm run typecheck    # nuxt typecheck (includes tests)
+npm test             # Vitest unit/component tests
+npm run build        # production build (.output)
+~~~
+
+### End-to-end tests (real API + PostgreSQL)
+
+`npm run test:e2e` builds the web app, starts the Nuxt server with `NUXT_API_BASE`, and runs Playwright on desktop (1280) and mobile (360). It expects:
+
+- PostgreSQL running on `127.0.0.1:55432` (see “Start PostgreSQL and migrate”).
+- The API running at `http://127.0.0.1:5080` with an administrator configured and a migrated database (use a dedicated database such as `draupnir_e2e`; the E2E run creates projects and imports Supervisor data).
+- Optional env: `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` (defaults `admin@draupnir.local` / `Draupnir!2026`), `NUXT_API_BASE`, `E2E_PORT`.
+
+~~~powershell
+# Example API process for E2E (separate database)
+$env:ConnectionStrings__Draupnir = 'Host=127.0.0.1;Port=55432;Database=draupnir_e2e;Username=postgres'
+$env:DRAUPNIR_ADMIN_EMAIL = 'admin@draupnir.local'
+$env:DRAUPNIR_ADMIN_PASSWORD = 'Draupnir!2026'
+dotnet run --project src/Draupnir.Api --no-build --no-restore -- --urls http://127.0.0.1:5080
+
+cd ../web
+npm run test:e2e
+~~~
+
+The flow covers login → create project → create requirement and two work items → add a dependency → attempt to move the dependent item to Done (blocked with a Chinese message) → import `tests/Draupnir.Api.Tests/Fixtures/queue.json` → approve a Human Gate through the confirmation dialog → generate and view a delivery report. It also runs axe (WCAG 2.1 A/AA) on the main pages and checks 360px pages for horizontal scrolling. Screenshots are written to `E:\Astra\.astra-runs\AUTONOMOUS-DELIVERY\acceptance\screens\draupnir` (override with `E2E_SCREENSHOT_DIR`).

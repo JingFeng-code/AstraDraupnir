@@ -9,7 +9,7 @@
     "postinstall": "nuxt prepare",
     "typecheck": "nuxt typecheck",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "nuxt build && playwright test"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
@@ -21,11 +21,14 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
     "@nuxt/test-utils": "^4.3.4",
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "1.63.0",
     "@vue/test-utils": "^2.5.1",
     "happy-dom": "^21.0.4",
     "typescript": "^5.8.3",
     "vitest": "^5.0.5",
     "vue-tsc": "^3.3.13"
+  },
+  "overrides": {
+    "playwright-core": "1.63.0"
   }
 }

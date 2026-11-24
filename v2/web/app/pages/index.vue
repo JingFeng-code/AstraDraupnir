@@ -1,1 +1,7 @@
-<template><main><h1>AstraDraupnir</h1></main></template>
+<script setup lang="ts">
+await navigateTo('/projects', { replace: true })
+</script>
+
+<template>
+  <div />
+</template>
