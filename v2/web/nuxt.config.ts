@@ -3,6 +3,8 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineNuxtConfig({
   vite: {
     plugins: [tailwindcss()],
+    // node_modules may be a junction to a sibling worktree (local multi-worktree setup); let the dev server serve its fonts
+    server: { fs: { strict: false } },
   },
   compatibilityDate: '2026-11-01',
   devtools: { enabled: false },
