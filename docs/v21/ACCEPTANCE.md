@@ -139,7 +139,7 @@ npm run test:e2e
 | 項目 | 指令 | 結果 |
 |---|---|---|
 | API build | `dotnet build --no-restore` | 0 warnings / 0 errors |
-| API tests | `dotnet test --no-restore`（隔離 DB） | **47 passed / 0 failed**（每個測試自建、自刪 `draupnir_test_<guid>`） |
+| API tests | `dotnet test --no-restore`（隔離 DB） | **49 passed / 0 failed** |
 | Web typecheck | `npx nuxt typecheck` | exit 0 |
 | Web unit/component | `npx vitest run` | **52 passed / 0 failed**（13 檔案） |
 | E2E（桌面 1280＋行動 360，真實 API + PostgreSQL） | `E2E_ALLOW_WRITE=1 E2E_STATE_DIR=… npm run test:e2e` | **26 passed**（fail-closed 寫入保護開啟；delivery + acceptance + a11y-keyboard） |

@@ -1,11 +1,11 @@
 # AstraDraupnir V2.1 — test summary
 
-對應程式最終 commit：**`1c6e645`**（PR #5 分支 `auto/p7-draupnir-v21`；本輪 ChatGPT 複審修正後）。每次 push 後請以該分支的最新 commit 重跑。
+對應 PR #5 分支 `auto/p7-draupnir-v21` 的最新程式 commit（`git log --oneline -- v2/api v2/web | head -1`）。ChatGPT 定點複審：GO for UAT（功能凍結）。
 
 | 項目 | 指令 | 結果 |
 |---|---|---|
 | API build | `dotnet build --no-restore` | 0 warnings / 0 errors |
-| API tests | `dotnet test --no-restore` | **47 passed / 0 failed**（每個測試自建、自刪 `draupnir_test_<guid>` 資料庫） |
+| API tests | `dotnet test --no-restore` | **49 passed / 0 failed**（每個測試自建、自刪 `draupnir_test_<guid>` 資料庫） |
 | Web typecheck | `npx nuxt typecheck` | exit 0 |
 | Web unit / component | `npx vitest run` | **52 passed / 0 failed**（13 檔案） |
 | E2E（桌面 1280＋行動 360） | `E2E_ALLOW_WRITE=1 E2E_STATE_DIR=<tmp> E2E_ADMIN_PASSWORD=… npm run test:e2e` | **26 passed**（fail-closed 寫入保護：API 必須回報 `disposable:true`，且資料庫名稱不得是 `draupnir`/`draupnir_v21`/`draupnir_design`） |

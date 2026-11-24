@@ -52,10 +52,13 @@ public static class SupervisorImport
             }
             else
             {
-                // 舊路徑（沒有 projectId、沒有明確 instance）：沿用既有資料列的 namespace。
-                run = await db.AgentRuns.Where(r => r.Source == RunSource.Supervisor &&
-                    r.ExternalTaskId == id && r.Attempt == attempt)
-                    .OrderBy(r => r.ProjectId).FirstOrDefaultAsync();
+                // 沒有 projectId、也沒有明確來源實例時，只能沿用「唯一」的既有資料列；
+                // 同一個 task id 出現在多個來源實例就無法判斷歸屬，拒絕匯入而不是隨便挑一筆。
+                var matches = await db.AgentRuns.Where(r => r.Source == RunSource.Supervisor &&
+                    r.ExternalTaskId == id && r.Attempt == attempt).Take(2).ToListAsync();
+                if (matches.Count > 1)
+                    return Conflict($"Task {id} exists in more than one Supervisor source instance; pass ?sourceInstance= or ?projectId=.");
+                run = matches.SingleOrDefault();
             }
 
             var repo = Text(row, "repo")?.Trim();
@@ -152,21 +155,30 @@ public static class SupervisorImport
             if (Normalize(status) == "WAITINGHUMAN" || Get(row, "requiresHuman").ValueKind == JsonValueKind.True)
             {
                 var gateInput = Get(row, "gate");
-                // 來源實例要進 ExternalRef，否則同一專案的兩個來源用同一個 TASK-001 會共用一個 Gate。
-                var externalRef = Text(gateInput, "externalRef") ?? $"supervisor:{instance}:{id}";
+                // 來源實例一定要進 ExternalRef（連自訂的 externalRef 也是）：否則同一專案的兩個來源
+                // 用同一個 TASK-001（或同一個自訂 ref）會共用一個 Gate。
+                var customRef = Text(gateInput, "externalRef");
+                var externalRef = customRef is null
+                    ? $"supervisor:{instance}:{id}"
+                    : $"supervisor:{instance}:{customRef}";
                 var gate = db.Gates.Local.FirstOrDefault(g => g.ProjectId == project.Id && g.ExternalRef == externalRef)
                     ?? await db.Gates.SingleOrDefaultAsync(g => g.ProjectId == project.Id && g.ExternalRef == externalRef);
-                if (gate is null && Text(gateInput, "externalRef") is null)
+                if (gate is null)
                 {
-                    // 升級前的 Gate 用舊格式 "supervisor:{id}"：只有在專案內沒有其他同格式 Gate 時才接手，
-                    // 保留既有決策與資料，不影響另一個來源實例。
-                    var legacyRef = $"supervisor:{id}";
-                    var legacy = db.Gates.Local.FirstOrDefault(g => g.ProjectId == project.Id && g.ExternalRef == legacyRef)
-                        ?? await db.Gates.SingleOrDefaultAsync(g => g.ProjectId == project.Id && g.ExternalRef == legacyRef);
-                    if (legacy is not null)
+                    // 升級前的 Gate（預設 "supervisor:{id}" 或當時照抄的自訂 ref）只有在仍是 Pending 時才接手：
+                    // 已經有人類決策的 Gate 不能被搬移到別的來源，寧可留下舊 Gate、另建一個新的。
+                    foreach (var legacyRef in new[] { $"supervisor:{id}", customRef })
                     {
-                        legacy.ExternalRef = externalRef;
-                        gate = legacy;
+                        if (string.IsNullOrWhiteSpace(legacyRef)) continue;
+                        if (legacyRef == externalRef) continue;
+                        var legacy = db.Gates.Local.FirstOrDefault(g => g.ProjectId == project.Id && g.ExternalRef == legacyRef)
+                            ?? await db.Gates.SingleOrDefaultAsync(g => g.ProjectId == project.Id && g.ExternalRef == legacyRef);
+                        if (legacy is { Status: GateStatus.Pending })
+                        {
+                            legacy.ExternalRef = externalRef;
+                            gate = legacy;
+                            break;
+                        }
                     }
                 }
                 if (gate is null)

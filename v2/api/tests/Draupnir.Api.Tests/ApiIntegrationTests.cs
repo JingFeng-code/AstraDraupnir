@@ -598,28 +598,83 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
     }
 
     [Fact]
-    public async Task LegacyGateWithoutSourceInstanceIsAdoptedNotDuplicated()
+    public async Task PendingLegacyGateIsAdoptedButADecidedOneIsLeftAlone()
     {
         using var client = await AuthorizedClient();
         var project = await NewProject(client, "LEGACY");
-        // 升級前格式的 Gate（沒有來源實例）
-        var legacy = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
-            new { title = "Legacy gate", externalRef = "supervisor:LEG-1" }));
-        // 先做一個決策，收購（adoption）後必須保留
-        await Json(await client.PostAsJsonAsync($"/api/gates/{legacy.GetProperty("id")}/decision",
-            new { approved = false, note = "Rejected before the upgrade" }));
+        // 升級前格式、尚未決定的 Gate：可以被接手
+        var pending = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
+            new { title = "Pending legacy gate", externalRef = "supervisor:LEG-1" }));
         var payload = new
         {
-            tasks = new[] { new { id = "LEG-1", title = "Legacy gate", status = "WAITING_HUMAN",
+            tasks = new[] { new { id = "LEG-1", title = "Pending legacy gate", status = "WAITING_HUMAN",
                 requiresHuman = true, repo = "sandbox", implementer = "t1" } }
         };
         await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}", payload));
         var gates = (await Json(await client.GetAsync($"/api/projects/{project}/gates"))).EnumerateArray().ToList();
-        Assert.Single(gates);
-        Assert.Equal(legacy.GetProperty("id").GetGuid(), gates[0].GetProperty("id").GetGuid());
-        Assert.Contains(":LEGACY:", gates[0].GetProperty("externalRef").GetString());
-        Assert.Equal("Rejected", gates[0].GetProperty("status").GetString());
-        Assert.Equal("Rejected before the upgrade", gates[0].GetProperty("note").GetString());
+        Assert.Equal(pending.GetProperty("id").GetGuid(), gates.Single().GetProperty("id").GetGuid());
+        Assert.Contains(":LEGACY:", gates.Single().GetProperty("externalRef").GetString());
+
+        // 已有人類決策的舊 Gate：不能被搬到別的來源
+        var decided = await Json(await client.PostAsJsonAsync($"/api/projects/{project}/gates",
+            new { title = "Decided legacy gate", externalRef = "supervisor:LEG-2" }));
+        await Json(await client.PostAsJsonAsync($"/api/gates/{decided.GetProperty("id")}/decision",
+            new { approved = false, note = "Rejected before the upgrade" }));
+        var payload2 = new
+        {
+            tasks = new[] { new { id = "LEG-2", title = "Decided legacy gate", status = "WAITING_HUMAN",
+                requiresHuman = true, repo = "sandbox", implementer = "t1" } }
+        };
+        await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}", payload2));
+        var after = (await Json(await client.GetAsync($"/api/projects/{project}/gates"))).EnumerateArray().ToList();
+        var oldGate = after.Single(g => g.GetProperty("id").GetGuid() == decided.GetProperty("id").GetGuid());
+        Assert.Equal("Rejected", oldGate.GetProperty("status").GetString());
+        Assert.Equal("supervisor:LEG-2", oldGate.GetProperty("externalRef").GetString());
+        Assert.Equal("Rejected before the upgrade", oldGate.GetProperty("note").GetString());
+        var fresh = after.Single(g => g.GetProperty("externalRef").GetString()!.Contains(":LEG-2") && g.GetProperty("id").GetGuid() != decided.GetProperty("id").GetGuid());
+        Assert.Equal("Pending", fresh.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task CustomGateRefIsNamespacedPerSourceInstance()
+    {
+        using var client = await AuthorizedClient();
+        var project = await NewProject(client, "CUSTOMREF");
+        var payload = new
+        {
+            tasks = new[] { new { id = "TASK-C", title = "Custom ref", status = "WAITING_HUMAN",
+                requiresHuman = true, repo = "sandbox", implementer = "t1", gate = new { externalRef = "release-42" } } }
+        };
+        await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}&sourceInstance=alpha", payload));
+        await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={project}&sourceInstance=beta", payload));
+        var gates = (await Json(await client.GetAsync($"/api/projects/{project}/gates"))).EnumerateArray().ToList();
+        Assert.Equal(2, gates.Count);
+        Assert.Contains(gates, g => g.GetProperty("externalRef").GetString() == "supervisor:alpha:release-42");
+        Assert.Contains(gates, g => g.GetProperty("externalRef").GetString() == "supervisor:beta:release-42");
+    }
+
+    [Fact]
+    public async Task AmbiguousSourceInstanceIsRefusedWithoutProjectOrInstance()
+    {
+        using var client = await AuthorizedClient();
+        var first = await NewProject(client, "AMBIG");
+        var second = await NewProject(client, "AMBIGB");
+        var payload = new
+        {
+            tasks = new[] { new { id = "SHARED-1", title = "Shared", status = "WAITING_HUMAN",
+                requiresHuman = true, repo = "sandbox", implementer = "t1" } }
+        };
+        await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={first}&sourceInstance=one", payload));
+        await Json(await client.PostAsJsonAsync($"/api/import/supervisor?projectId={second}&sourceInstance=two", payload));
+
+        // 沒有 projectId、沒有 sourceInstance：同一個 task id 有兩個來源，必須拒絕而不是亂挑
+        var refused = await client.PostAsJsonAsync("/api/import/supervisor", payload);
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Contains("more than one", (await Json(refused, requireSuccess: false)).GetProperty("detail").GetString());
+
+        // 帶上 sourceInstance 才允許（而且只會動到該來源的資料）
+        var allowed = await client.PostAsJsonAsync("/api/import/supervisor?sourceInstance=one", payload);
+        Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
     }
 
     [Fact]
