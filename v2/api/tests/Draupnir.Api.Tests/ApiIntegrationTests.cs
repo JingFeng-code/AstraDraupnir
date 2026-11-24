@@ -98,6 +98,31 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
     }
 
     [Fact]
+    public async Task BugsSupportSeverityFilterAndDependencyRules()
+    {
+        using var client = await AuthorizedClient();
+        var project = await NewProject(client, "BUGS");
+        var bugA = await NewWork(client, project, "BUGS-1", "First bug", null, "Bug", "S2");
+        var bugB = await NewWork(client, project, "BUGS-2", "Second bug", null, "Bug", "S1");
+
+        var filtered = await Json(await client.GetAsync($"/api/projects/{project}/work-items?type=Bug"));
+        Assert.Equal(2, filtered.GetProperty("total").GetInt32());
+        var first = filtered.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("code").GetString() == "BUGS-1");
+        Assert.Equal("Bug", first.GetProperty("type").GetString());
+        Assert.Equal("S2", first.GetProperty("severity").GetString());
+
+        var invalid = await client.PostAsJsonAsync($"/api/projects/{project}/work-items",
+            new { code = "BUGS-3", title = "Bad severity", type = "Bug", severity = "S9" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.True((await Json(invalid, requireSuccess: false)).GetProperty("errors").TryGetProperty("severity", out _));
+
+        Assert.Equal(HttpStatusCode.Created, (await AddDependency(client, bugB, bugA)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await PatchStatus(client, bugB, "Done")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await PatchStatus(client, bugA, "Done")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await PatchStatus(client, bugB, "Done")).StatusCode);
+    }
+
+    [Fact]
     public async Task SingleActiveSprintAndMilestoneAssociationsAreEnforced()
     {
         using var client = await AuthorizedClient();
@@ -234,8 +259,8 @@ public sealed class ApiIntegrationTests(PostgresFixture postgres) : IClassFixtur
     }
     private static async Task<Guid> NewProject(HttpClient client, string key) =>
         (await Json(await client.PostAsJsonAsync("/api/projects", new { key, name = key }))).GetProperty("id").GetGuid();
-    private static async Task<Guid> NewWork(HttpClient client, Guid project, string code, string title, Guid? sprintId = null, string type = "Task") =>
-        (await Json(await client.PostAsJsonAsync($"/api/projects/{project}/work-items", new { code, title, sprintId, type }))).GetProperty("id").GetGuid();
+    private static async Task<Guid> NewWork(HttpClient client, Guid project, string code, string title, Guid? sprintId = null, string type = "Task", string? severity = null) =>
+        (await Json(await client.PostAsJsonAsync($"/api/projects/{project}/work-items", new { code, title, sprintId, type, severity }))).GetProperty("id").GetGuid();
     private static Task<HttpResponseMessage> PatchStatus(HttpClient client, Guid id, string status, string? reason = null) =>
         client.PatchAsJsonAsync($"/api/work-items/{id}/status", new { status, reason });
     private static Task<HttpResponseMessage> AddDependency(HttpClient client, Guid id, Guid dependsOnId) =>

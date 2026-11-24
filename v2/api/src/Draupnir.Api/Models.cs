@@ -58,6 +58,7 @@ public sealed class Requirement : IProjectChild
 
 public sealed class WorkItem : IProjectChild
 {
+    public static readonly string[] SeverityValues = ["S1", "S2", "S3", "S4"];
     public Guid Id { get; set; }
     public Guid ProjectId { get; set; }
     [Required, MaxLength(50)] public string Code { get; set; } = "";

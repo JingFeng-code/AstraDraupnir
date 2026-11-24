@@ -112,6 +112,8 @@ public static class ProjectEndpoints
             if (!Regex.IsMatch(work.Code, "^" + project.Key + "-[1-9][0-9]*$"))
                 return Invalid("code", $"Use {project.Key}-n.");
             if (work.StartDate > work.DueDate) return Invalid("dueDate", "Due date cannot precede start date.");
+            if (!string.IsNullOrWhiteSpace(work.Severity) && !WorkItem.SeverityValues.Contains(work.Severity))
+                return Invalid("severity", "Severity must be S1, S2, S3 or S4.");
             if (!await Matches<Requirement>(db, work.RequirementId, projectId))
                 return Invalid("requirementId", "Requirement must belong to the project.");
             if (!await Matches<Sprint>(db, work.SprintId, projectId))
