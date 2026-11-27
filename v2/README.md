@@ -142,3 +142,9 @@ The flow covers login → create project → create requirement and two work ite
 ## V2.1 frozen delivery
 
 See [release readiness](../docs/v21/RELEASE-READINESS.md), [acceptance](../docs/v21/ACCEPTANCE.md), and [test summary](../docs/v21/TEST-SUMMARY.md). Local product direction accepted, feature-frozen, full owner UAT not recorded. Draft PR #5 is not merged, released or deployed.
+
+### Local Engineering Memory query
+
+Configure EngineeringMemory__Python, EngineeringMemory__Script and EngineeringMemory__Root on the API host. Point Script to BookOfThoth's tools/engineering_memory.py and Root to a directory accessible only to the intended API account and local operators. Store each approved project database as <project-guid>.sqlite and import using that same GUID as the CLI's project value.
+
+GET /api/projects/{projectId}/memory?q=encoding uses the signed-in user's project access. The API invokes the local CLI for a read-only query. Unconfigured deployments return 503, unavailable CLI queries return 502, and a query exceeding five seconds returns 504. A project with no database returns no_results. This endpoint provides query access only.

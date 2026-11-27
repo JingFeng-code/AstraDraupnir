@@ -128,6 +128,7 @@ api.MapGet("/auth/me", async (ClaimsPrincipal principal, DraupnirDb db) =>
 api.MapProjectEndpoints();
 api.MapDeliveryEndpoints();
 api.MapSpoolEndpoints();
+api.MapMemoryEndpoints();
 api.MapUserEndpoints();
 
 if (args.Contains("--seed-demo") || !EF.IsDesignTime)
