@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "maxWorkers": 3,
+  "agents": {
+    "t11j": {
+      "role": "orchestrator",
+      "dispatchable": false
+    },
+    "t10m": {
+      "role": "implementer",
+      "dispatchable": true
+    },
+    "t10n": {
+      "role": "reviewer",
+      "dispatchable": true
+    }
+  },
+  "tasks": [
+    {
+      "id": "EXAMPLE-01",
+      "title": "Update a local greeter test",
+      "repo": "sandbox",
+      "worktree": "sandbox/greeter",
+      "branch": "example/greeter",
+      "type": "agent",
+      "priority": 10,
+      "deps": [],
+      "implementer": "t10m",
+      "reviewer": "t10n",
+      "acceptance": [
+        "The greeter tests pass."
+      ],
+      "verify": {
+        "command": "npm test",
+        "cwd": ".",
+        "timeoutSec": 120
+      },
+      "status": "BACKLOG",
+      "attempts": 0,
+      "retries": 0,
+      "maxRetries": 2,
+      "fingerprints": [],
+      "sessionId": null,
+      "turn": null,
+      "commit": null,
+      "lastUpdated": null,
+      "resume": null,
+      "requiresHuman": true
+    }
+  ]
+}

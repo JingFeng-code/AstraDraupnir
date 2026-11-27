@@ -1,0 +1,37 @@
+{
+  "schema": "astra-delivery-tasks/v1",
+  "updatedAt": "2026-11-24T00:00:00+08:00",
+  "agents": {
+    "t11j": { "role": "orchestrator", "cli": "claude-code", "model": "claude-opus-5-5", "dispatchable": false },
+    "t10m": { "role": "engineer-main", "cli": "codex", "model": "gpt-6.2-sol", "effort": "low (global config, not changed)", "dispatchable": true },
+    "t10n": { "role": "engineer-second", "cli": "pi", "provider": "example", "model": "example-model", "dispatchable": true },
+    "t11k": { "role": "micro-tasks", "cli": "opencode", "model": "example-model", "dispatchable": true, "limits": "single/few files, no large scans" },
+    "t11t": { "role": "retired", "cli": "codex", "dispatchable": false, "note": "Batch-00 child session; kill denied by classifier; excluded from dispatch" }
+  },
+  "limits": { "maxWorkers": 3, "maxSameFingerprintFailures": 3 },
+  "tasks": [
+    { "id": "T06", "phase": 3, "title": "Real E2E via AstraFlow bridge on sandbox/e2e-greeter", "status": "WAITING_HUMAN", "deps": ["T13"], "agent": "t10m", "reviewer": "t10n", "sessionId": null, "repo": "sandbox", "worktree": "sandbox/e2e-greeter", "branch": null, "commit": null, "retries": 0, "acceptance": null, "resume": "HUMAN-APPROVALS.md#HA-01 then rerun bridge command" },
+    { "id": "T13", "phase": 3, "title": "Bridge verify/review rework loop, fingerprints, lock, resume", "status": "IMPLEMENTING", "deps": [], "agent": "t10m", "reviewer": "t11j", "repo": "AstraGleipnir", "worktree": "worktrees/Gleipnir-p3", "branch": "auto/p3-flow-rework", "commit": null, "retries": 0, "acceptance": null, "taskFile": "tasks/T13-flow-rework.md" },
+    { "id": "T14", "phase": 3, "title": "Stylus full pytest independent rerun", "status": "VERIFYING", "deps": [], "agent": "t11j", "repo": "AstraStylus", "worktree": "worktrees/Stylus", "branch": "auto/baseline", "commit": "42779d2", "retries": 0, "acceptance": null, "log": "evidence/claude/stylus-full-pytest.log" },
+    { "id": "T15", "phase": 4, "title": "Supervisor contract + ADR", "status": "READY", "deps": [], "agent": "t11j", "repo": "AstraGleipnir", "retries": 0 },
+    { "id": "T16", "phase": 4, "title": "Supervisor implementation (integrations/astra-supervisor)", "status": "BLOCKED_DEP", "deps": ["T13", "T15"], "agent": "t10m", "reviewer": "t11j", "repo": "AstraGleipnir", "retries": 0 },
+    { "id": "T17", "phase": 4, "title": "Supervisor acceptance with real hc processes", "status": "BLOCKED_DEP", "deps": ["T16"], "agent": "t11j", "repo": "AstraGleipnir", "retries": 0 },
+    { "id": "T20", "phase": 5, "title": "Skidbladnir i18n /en, dark mode, Journal, Astra showcase", "status": "IMPLEMENTING", "deps": [], "agent": "t10n", "reviewer": "t11j", "repo": "AstraSkidbladnir", "worktree": "worktrees/Skidbladnir", "branch": "auto/p5-skidbladnir", "commit": null, "retries": 0, "taskFile": "tasks/T20-skidbladnir.md" },
+    { "id": "T21", "phase": 5, "title": "Draupnir ADR incremental vs V2", "status": "READY", "deps": [], "agent": "t11j", "repo": "AstraDraupnir", "retries": 0 },
+    { "id": "T23", "phase": 5, "title": "Portable PostgreSQL local env (no service)", "status": "READY", "deps": [], "agent": "t11j", "repo": "env", "retries": 0 },
+    { "id": "T22", "phase": 5, "title": "Draupnir V2 API (ASP.NET Core 10 + PostgreSQL)", "status": "BLOCKED_DEP", "deps": ["T21", "T23"], "agent": "t10m", "reviewer": "t11j", "repo": "AstraDraupnir", "retries": 0 },
+    { "id": "T24", "phase": 5, "title": "Draupnir V2 web (Nuxt 4)", "status": "BLOCKED_DEP", "deps": ["T22"], "agent": "t10n", "reviewer": "t11j", "repo": "AstraDraupnir", "retries": 0 },
+    { "id": "T25", "phase": 5, "title": "YataKagami 503 static analysis + local uvicorn repro", "status": "READY", "deps": [], "agent": "t11j", "repo": "AstraYataKagami", "retries": 0 },
+    { "id": "T26", "phase": 5, "title": "YataKagami API tests, typecheck, health/diagnostics", "status": "BLOCKED_DEP", "deps": ["T25"], "agent": "t10n", "reviewer": "t11j", "repo": "AstraYataKagami", "retries": 0 },
+    { "id": "T27", "phase": 5, "title": "Spool structured JSON output + impact/test mapping", "status": "READY", "deps": [], "agent": "t10m", "reviewer": "t11j", "repo": "AstraSpool", "retries": 0 },
+    { "id": "T28", "phase": 5, "title": "Stylus UML class diagram + diagram set + PDF check", "status": "BLOCKED_DEP", "deps": ["T14"], "agent": "t10m", "reviewer": "t11j", "repo": "AstraStylus", "retries": 0 },
+    { "id": "T30", "phase": 5, "title": "Kantele component library + flows + tests", "status": "READY", "deps": [], "agent": "t10n", "reviewer": "t11j", "repo": "AstraKantele", "retries": 0 },
+    { "id": "T31", "phase": 5, "title": "Kozuchi test suite + agent work view", "status": "READY", "deps": [], "agent": "t10n", "reviewer": "t11j", "repo": "AstraKozuchi", "retries": 0 },
+    { "id": "T32", "phase": 5, "title": "Aegis export/import/diff/secret exclusion tests (redirected target)", "status": "READY", "deps": [], "agent": "t10n", "reviewer": "t11j", "repo": "AstraAegis", "retries": 0 },
+    { "id": "T33", "phase": 5, "title": "Gjallarhorn isolated-HOME verification + diff/secret tests", "status": "READY", "deps": [], "agent": "t11k", "reviewer": "t11j", "repo": "AstraGjallarhorn", "retries": 0 },
+    { "id": "T34", "phase": 5, "title": "BookOfThoth knowledge index + JSON interface + dup/stale lint", "status": "READY", "deps": [], "agent": "t10n", "reviewer": "t11j", "repo": "AstraBookOfThoth", "retries": 0 },
+    { "id": "T35", "phase": 5, "title": "Sampo long-video chunking / token / 429 regression", "status": "READY", "deps": [], "agent": "t10m", "reviewer": "t11j", "repo": "AstraSampo", "retries": 0 },
+    { "id": "T29", "phase": 5, "title": "Gleipnir supervisor integration, events, install docs", "status": "BLOCKED_DEP", "deps": ["T16"], "agent": "t10m", "reviewer": "t11j", "repo": "AstraGleipnir", "retries": 0 },
+    { "id": "T40", "phase": 5, "title": "Acceptance package (acceptance/*)", "status": "BLOCKED_DEP", "deps": ["*"], "agent": "t11j", "repo": "all", "retries": 0 }
+  ]
+}

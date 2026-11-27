@@ -1,0 +1,95 @@
+import { describe, expect, it } from 'vitest'
+import { agentName, gateEvidence } from '~/lib/evidenceRules'
+import type { Trace } from '~/lib/engineering'
+import type { Evidence, HumanGate, Review, WorkItem } from '~/types/api'
+
+const gate: HumanGate = {
+  id: 'g1', projectId: 'p1', workItemId: 'w1', externalRef: 'supervisor:1', title: 'Gate',
+  status: 'Pending', decidedBy: null, decidedAt: null, note: null,
+}
+const item: WorkItem = {
+  id: 'w1', projectId: 'p1', code: 'P-1', type: 'Task', title: 'Work', description: '',
+  status: 'InReview', priority: 'P2', assigneeKind: 'None', assignee: null, requirementId: null,
+  sprintId: null, milestoneId: null, estimate: null, startDate: null, dueDate: null, severity: null,
+  blockedReason: null,
+}
+const evidence = (result: Evidence['result'], agentRunId: string | null = null,
+  recordedAt = '2026-11-24T00:00:00Z'): Evidence => ({
+  id: `e-${result}-${agentRunId ?? 'direct'}-${recordedAt}`, projectId: 'p1', workItemId: 'w1',
+  agentRunId, kind: 'Test', title: 'test', path: null, url: null, result, recordedAt,
+  spoolResultHash: null, data: null,
+})
+const review = (verdict: Review['verdict']): Review => ({
+  id: `r-${verdict}`, workItemId: 'w1', agentRunId: null, reviewer: 'Pi', verdict,
+  findings: [], createdAt: '2026-11-24T00:00:00Z',
+})
+function trace(ev: Evidence[], rv: Review[] = [], runs: Trace['runs'] = [], updatedAt: string | null = null): Trace {
+  return { stops: [], requirement: null, item: { ...item, updatedAt }, runs, evidence: ev, reviews: rv, gate }
+}
+
+const run = (id: string, attempt: number, taskId = 'T-1', sourceInstance = 'src'): Trace['runs'][number] => ({
+  id, projectId: 'p1', workItemId: 'w1', externalTaskId: taskId, sourceInstance, agent: 'Pi',
+  model: 'test', sessionId: null, status: 'DONE', attempt, startedAt: null, finishedAt: null, source: 'Supervisor',
+})
+
+describe('gate evidence rules', () => {
+  it('manual when no work item trace exists', () => {
+    const result = gateEvidence(gate, null)
+    expect(result.state).toBe('manual')
+    expect(result.canApprove).toBe(true)
+    expect(result.needsException).toBe(false)
+  })
+  it('satisfied only with a pass and no fail/change request', () => {
+    const result = gateEvidence(gate, trace([evidence('Pass')]))
+    expect(result.state).toBe('satisfied')
+    expect(result.canApprove).toBe(true)
+  })
+  it('blocks direct approval on failed evidence or changes requested', () => {
+    const result = gateEvidence(gate, trace([evidence('Pass'), evidence('Fail')], [review('ChangesRequested')]))
+    expect(result.state).toBe('failed')
+    expect(result.canApprove).toBe(false)
+    expect(result.needsException).toBe(true)
+  })
+  it('treats missing passes as an exception, never a silent approval', () => {
+    const result = gateEvidence(gate, trace([]))
+    expect(result.state).toBe('missing')
+    expect(result.canApprove).toBe(false)
+    expect(result.needsException).toBe(true)
+  })
+  it('uses only the latest attempt of a source, so an older Fail does not block a retry', () => {
+    const result = gateEvidence(gate, trace([
+      evidence('Fail', 'r1'), evidence('Pass', 'r2'),
+    ], [], [run('r1', 1), run('r2', 2)]))
+    expect(result.state).toBe('satisfied')
+    expect(result.canApprove).toBe(true)
+  })
+  it('does not collapse two tasks from the same source into one latest bucket', () => {
+    const result = gateEvidence(gate, trace([
+      evidence('Fail', 'r1'), evidence('Pass', 'r2'),
+    ], [], [run('r1', 1, 'TASK-A'), run('r2', 2, 'TASK-B')]))
+    expect(result.state).toBe('failed')
+    expect(result.canApprove).toBe(false)
+  })
+  it('aggregates the latest attempt of every task from the same source', () => {
+    const result = gateEvidence(gate, trace([
+      evidence('Fail', 'r1a'), evidence('Pass', 'r1b'), evidence('Pass', 'r2'),
+    ], [], [run('r1a', 1, 'TASK-A'), run('r1b', 2, 'TASK-A'), run('r2', 1, 'TASK-B')]))
+    expect(result.state).toBe('satisfied')
+    expect(result.canApprove).toBe(true)
+  })
+  it('treats evidence older than the work item update as stale', () => {
+    const result = gateEvidence(gate, trace([evidence('Pass', 'r1', '2026-11-24T00:00:00Z')], [],
+      [run('r1', 1)], '2026-11-25T00:00:00Z'))
+    expect(result.state).toBe('missing')
+    expect(result.canApprove).toBe(false)
+    expect(result.needsException).toBe(true)
+  })
+  it('requires a written reason for a no-work-item gate', () => {
+    expect(gateEvidence(gate, null).requiresReason).toBe(true)
+  })
+  it('never guesses an Unknown agent name', () => {
+    expect(agentName('Unknown')).toBe('未確認')
+    expect(agentName('')).toBe('未確認')
+    expect(agentName('Pi')).toBe('Pi')
+  })
+})

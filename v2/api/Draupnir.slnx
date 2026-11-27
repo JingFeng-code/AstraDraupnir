@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Draupnir.Api/Draupnir.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Draupnir.Api.Tests/Draupnir.Api.Tests.csproj" />
+  </Folder>
+</Solution>
